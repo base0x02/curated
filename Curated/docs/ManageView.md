@@ -128,7 +128,7 @@ To change *which* creators show up, edit `shownLibraries`. To change their *orde
 **Add a new control to every creator row**
 1. Find `CreatorManageRow.body` (line 418). The row is one `HStack`, so controls appear in the order they're written.
 2. Add your view where you want it. Use `RowControl.height` for its height so it matches the others.
-3. If it changes a creator setting, add a `setX(_:for:)` method to `AppModel` (copy `setMinViews`) and a field on `Creator` in `Models.swift`. The field must be optional or have a default; see "Old files must keep loading" in `CLAUDE.md`.
+3. If it changes a creator setting, add a `setX(_:for:)` method to `AppModel` (copy `setMinViews`) and a field on `Creator` in `Models.swift`. The field must be optional or have a default, so config files saved by older builds keep loading.
 4. If the control only shows up on some rows, wrap it in a fixed-width slot (`ZStack { Color.clear; if … { … } }.frame(width:)`) like the resolution slot at line 464. Otherwise the columns won't line up from row to row.
 
 **Add an item to a row's ⋯ menu**: add a `Button` inside the `Menu { … }` at line 512.
@@ -158,7 +158,7 @@ To change *which* creators show up, edit `shownLibraries`. To change their *orde
 
 ## 6. Trying out your changes safely
 
-Don't test against your real library. Run a debug build with a scratch data folder, as `CLAUDE.md` → "Testing" describes. Add `CURATED_TEST_SELECT=manage` to open straight onto this screen.
+Don't test against your real library. Run a debug build with a scratch data folder, as "Testing without touching real data" in `dev-readme.md` at the top of the repo describes. Add `CURATED_TEST_SELECT=manage` to open straight onto this screen.
 
 Before the first run, put a `config.json` in the scratch folder whose `settings` has `"libraryPath"` set to a scratch folder too (plus `"syncEnabled": true`). Without it, the app uses its default library folder, `~/Movies/Curated`, which is your real one.
 
