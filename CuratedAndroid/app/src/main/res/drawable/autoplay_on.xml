@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Autoplay next on: an up arrow whose stem breaks into dashes (from icons and logos/autoscroll on.png). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FF000000" android:strokeColor="#FF000000" android:strokeWidth="1.6" android:strokeLineJoin="round" android:pathData="M12.00 2.60 L19.40 10.00 L13.40 10.00 L13.40 12.60 L10.60 12.60 L10.60 10.00 L4.60 10.00 Z" />
+    <path android:fillColor="#FF000000" android:pathData="M10.70 15.00 L13.30 15.00 A0.9 0.9 0 0 1 14.20 15.90 L14.20 16.90 A0.9 0.9 0 0 1 13.30 17.80 L10.70 17.80 A0.9 0.9 0 0 1 9.80 16.90 L9.80 15.90 A0.9 0.9 0 0 1 10.70 15.00 Z" />
+    <path android:fillColor="#FF000000" android:pathData="M10.70 19.80 L13.30 19.80 A0.9 0.9 0 0 1 14.20 20.70 L14.20 21.70 A0.9 0.9 0 0 1 13.30 22.60 L10.70 22.60 A0.9 0.9 0 0 1 9.80 21.70 L9.80 20.70 A0.9 0.9 0 0 1 10.70 19.80 Z" />
+</vector>

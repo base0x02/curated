@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Autoplay next off (the video loops): the arrow, slashed (from icons and logos/autoscroll off.png). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <path d="M13.40 16.76 L13.40 21.80 L10.60 21.80 L10.60 14.76 Z" fill="#000" stroke="#000" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M8.48 6.12 L12.00 2.60 L19.40 10.00 L13.91 10.00 Z" fill="#000" stroke="#000" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M3.6 6.2 L20.4 18.2" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round"/>
+</svg>
