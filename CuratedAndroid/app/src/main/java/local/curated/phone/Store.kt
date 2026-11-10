@@ -40,6 +40,8 @@ class Store(context: Context) {
     fun partialFile(video: Video) = File(videosDir, "${video.id}.${video.fileExtension}.part")
     fun avatarFile(username: String) = File(avatarsDir, "$username.jpg")
     fun posterFile(video: Video) = File(postersDir, "${video.id}.jpg")
+    /** By name, for ArtworkProvider, which is only given a video's id. */
+    fun posterFile(id: String) = File(postersDir, "$id.jpg")
 
     /** Only complete files count; downloads land as .part and are renamed when done. */
     fun isDownloaded(video: Video): Boolean = videoFile(video).let { it.exists() && (video.size <= 0 || it.length() == video.size) }

@@ -14,8 +14,14 @@ android {
         minSdk = 29
         targetSdk = 36
         // Kept in step with the Mac app's VERSION and BUILD_NUMBER.
-        versionCode = 22
+        versionCode = 26
         versionName = "2.2"
+        manifestPlaceholders["appLabel"] = "Curated"
+        // `-PautoTest` builds a copy that installs beside the real app with its own data, for testing on a real phone.
+        if (project.hasProperty("autoTest")) {
+            applicationIdSuffix = ".autotest"
+            manifestPlaceholders["appLabel"] = "Curated Test"
+        }
     }
 
     buildTypes {
@@ -48,6 +54,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.11.1")
     implementation("androidx.media3:media3-ui:1.11.1")
     implementation("androidx.media3:media3-session:1.11.1")
+    implementation("androidx.car.app:app:1.7.0")
     implementation("androidx.window:window:1.5.0")
     implementation("androidx.work:work-runtime-ktx:2.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")

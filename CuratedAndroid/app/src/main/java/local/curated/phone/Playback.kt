@@ -22,7 +22,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** One player for the whole app, like the Mac's Playback. Main thread only. */
-class Playback(context: Context, private val app: AppState) {
+class Playback(private val context: Context, private val app: AppState) {
     val player: ExoPlayer = ExoPlayer.Builder(context)
         // Pause for calls and other apps' audio, and when headphones are unplugged.
         .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
@@ -64,6 +64,10 @@ class Playback(context: Context, private val app: AppState) {
     var queueShown by mutableStateOf(false)
     /** A long video ended with autoplay off, and there's another to play: the player waits on the Up Next card. */
     var awaitingNext by mutableStateOf(false); private set
+    /** Android Auto is connected: only the sound plays, with the phone anywhere, and it doesn't stop to wait for a tap. */
+    var inCar by mutableStateOf(false); private set
+    /** The app's window is on the phone's screen. */
+    var onScreen = false
     private var lastSavedPosition = 0.0
 
     companion object {
@@ -213,6 +217,7 @@ class Playback(context: Context, private val app: AppState) {
         val metadata = MediaMetadata.Builder()
             .setTitle(if (video.form == VideoForm.LONG) video.displayTitle else video.caption.ifEmpty { "No caption" })
             .setArtist(app.library(video.creator, video.form)?.creator?.displayName ?: "@${video.creator.removePrefix(YOUTUBE_KEY_PREFIX)}")
+            .setArtworkUri(CarArtwork.video(context, video.id))
             .build()
         player.setMediaItem(
             MediaItem.Builder().setUri(Uri.fromFile(app.store.videoFile(video))).setMediaMetadata(metadata).build(),
@@ -258,13 +263,13 @@ class Playback(context: Context, private val app: AppState) {
     private fun videoEnded() {
         val index = index ?: return
         val video = queue.getOrNull(index) ?: return
-        if (video.form == VideoForm.SHORT && !app.autoplayShort) {
+        if (video.form == VideoForm.SHORT && !app.autoplayShort && !inCar) {
             app.setPlayed(video, true)
             player.seekTo(0)
             player.play()
             return
         }
-        if (video.form != VideoForm.LONG || app.autoplayLong) return advance(markingPlayed = true)
+        if (video.form != VideoForm.LONG || app.autoplayLong || inCar) return advance(markingPlayed = true)
         app.setPlayed(video, true)
         if (nextIndex(after = index) != null) awaitingNext = true else finished = true
     }
@@ -428,6 +433,12 @@ class Playback(context: Context, private val app: AppState) {
     private fun applySpeed() {
         speedLocked = current?.let { app.playsAtNormalSpeed(it, mode) } ?: false
         player.setPlaybackSpeed(if (isHoldingFast) 2f else shownSpeed)
+    }
+
+    /** The car came or went. Leaving the car stops the sound, unless the phone is in use. */
+    fun carConnectionChanged(connected: Boolean) {
+        if (inCar && !connected && !onScreen) pause()
+        inCar = connected
     }
 
     fun stop() {

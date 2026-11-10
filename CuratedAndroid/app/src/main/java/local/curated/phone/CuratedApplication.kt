@@ -2,6 +2,10 @@ package local.curated.phone
 
 import android.app.Application
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import androidx.compose.runtime.snapshots.Snapshot
+import androidx.car.app.connection.CarConnection
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 
@@ -13,8 +17,30 @@ class CuratedApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        deliverStateChangesWithoutWindow()
         state = AppState(this)
         playback = Playback(this, state)
+        CarConnection(this).type.observeForever { type ->
+            playback.carConnectionChanged(type == CarConnection.CONNECTION_TYPE_PROJECTION || type == CarConnection.CONNECTION_TYPE_NATIVE)
+        }
+    }
+}
+
+/**
+ * `snapshotFlow` only hears of changes once they're announced, which Compose starts doing when it first draws. Started by
+ * Android Auto, the app has no window, so nothing would ever draw.
+ */
+private fun deliverStateChangesWithoutWindow() {
+    val handler = Handler(Looper.getMainLooper())
+    var scheduled = false
+    Snapshot.registerGlobalWriteObserver {
+        if (!scheduled) {
+            scheduled = true
+            handler.post {
+                scheduled = false
+                Snapshot.sendApplyNotifications()
+            }
+        }
     }
 }
 

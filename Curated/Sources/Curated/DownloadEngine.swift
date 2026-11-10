@@ -518,11 +518,13 @@ enum DownloadEngine {
             // Long: at most the creator's resolution (or the one picked for the video), plus YouTube's thumbnail as
             // a poster beside it (same name, .jpg; a video's first frame is often black).
             // Best: the highest resolution that's H.264, which on YouTube is 1080p.
+            // `lang` comes first so YouTube's original audio wins over its auto-dubbed tracks (otherwise the
+            // highest-bitrate dub, any language, could be picked).
             let longFormat = height.map { height in
-                ["-f", "bv*[height<=\(height)]+ba/b[height<=\(height)]/bv*+ba/b", "-S", "vcodec:h264,res:\(height),acodec:m4a"]
-            } ?? ["-f", "bv*+ba/b", "-S", "vcodec:h264,res,acodec:m4a"]
+                ["-f", "bv*[height<=\(height)]+ba/b[height<=\(height)]/bv*+ba/b", "-S", "lang,vcodec:h264,res:\(height),acodec:m4a"]
+            } ?? ["-f", "bv*+ba/b", "-S", "lang,vcodec:h264,res,acodec:m4a"]
             let format = form == .short
-                ? ["-f", "b[vcodec!=none]/bv*+ba", "-S", "vcodec:h264,res,br"]
+                ? ["-f", "b[vcodec!=none]/bv*+ba", "-S", "lang,vcodec:h264,res,br"]
                 : longFormat + ["--write-thumbnail", "--convert-thumbnails", "jpg",
                                 "-o", "thumbnail:" + folder.appendingPathComponent("%(timestamp)s_%(id)s.%(ext)s").path]
             var errors: [String] = []

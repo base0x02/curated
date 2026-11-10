@@ -168,7 +168,8 @@ fun PlayerScreen(mode: PlaybackMode, onBack: () -> Unit, layout: PlayerLayout = 
     val side = layout == PlayerLayout.Side
     // Back (arrow or system gesture) pauses; the video stays in the Now Playing bar.
     val leave = {
-        playback.pause()
+        // Not when the car has since started another queue.
+        if (playback.mode == mode) playback.pause()
         onBack()
     }
     // Beside other screens, the left pane handles Back.

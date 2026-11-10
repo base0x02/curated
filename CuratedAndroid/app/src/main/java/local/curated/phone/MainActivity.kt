@@ -98,7 +98,11 @@ class MainActivity : ComponentActivity() {
         ContextCompat.registerReceiver(this, pipReceiver, IntentFilter(ACTION_PIP_CONTROL), ContextCompat.RECEIVER_NOT_EXPORTED)
         // A fresh launch goes straight to Automix (Home stays underneath for Back) when there's something to watch.
         val state = curated.state
-        if (savedInstanceState == null && stack.size == 1 && state.unplayedCount(null) > 0) {
+        // Opened while the car is playing something: that, rather than Automix loading over it.
+        val inCarMode = playback.mode.takeIf { playback.inCar && playback.current != null && !playback.finished }
+        if (savedInstanceState == null && stack.size == 1 && inCarMode != null) {
+            stack.add(Screen.Player(inCarMode))
+        } else if (savedInstanceState == null && stack.size == 1 && state.unplayedCount(null) > 0) {
             stack.add(Screen.Player(PlaybackMode.Automix(null)))
         }
         setContent {
@@ -174,14 +178,16 @@ class MainActivity : ComponentActivity() {
     /** A video may have moved on on another device. */
     override fun onStart() {
         super.onStart()
+        playback.onScreen = true
         curated.state.exchangePositions()
         curated.state.resumeFollowingRequestedVideos()
     }
 
-    /** Also runs when the picture-in-picture window is closed. Locking the screen keeps the video playing. */
+    /** Also runs when the picture-in-picture window is closed. Locking the screen keeps the video playing, as does being in the car. */
     override fun onStop() {
         super.onStop()
-        if (getSystemService(PowerManager::class.java).isInteractive) playback.pause()
+        playback.onScreen = false
+        if (getSystemService(PowerManager::class.java).isInteractive && !playback.inCar) playback.pause()
         // So another device can pick up from here, even if this one is never opened again.
         playback.savePosition()
         curated.state.sendPositionsSoon()

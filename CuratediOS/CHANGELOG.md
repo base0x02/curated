@@ -259,3 +259,7 @@ The iPhone companion, caught up with the Android app (version in step with the M
 ## 2026-11-07 · A picture on the lock screen
 
 - The lock screen and Control Center now show the video's thumbnail. Long videos use their poster, and short videos a frame from the video
+
+## 2026-11-10 · A calmer sunshine panel
+
+- The end of a time-limited or Top mix, or of a creator's videos, is now a quiet daybreak: a twilight sky with a few stars warms to morning as a soft sun rises from behind layered hills, then the message fades up in the system font. The smiling sun, birds, flowers and bouncing letters are gone. With Reduce Motion it shows the finished scene, standing still

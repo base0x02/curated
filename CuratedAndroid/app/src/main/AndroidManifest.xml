@@ -12,7 +12,7 @@
 
     <application
         android:name=".CuratedApplication"
-        android:label="Curated"
+        android:label="${appLabel}"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:theme="@style/Theme.Curated"
@@ -37,9 +37,21 @@
             android:exported="true"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
-                <action android:name="androidx.media3.session.MediaSessionService" />
+                <action android:name="androidx.media3.session.MediaLibraryService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
+
+        <!-- Android Auto: this is a media app, whose screens it draws from PlaybackService's library. -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+
+        <!-- Thumbnails and the car's tiles, for Android Auto and the media notification. Read only, and pictures only. -->
+        <provider
+            android:name=".ArtworkProvider"
+            android:authorities="${applicationId}.artwork"
+            android:exported="true" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

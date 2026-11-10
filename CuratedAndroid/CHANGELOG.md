@@ -255,3 +255,15 @@ Version now tracks the Mac app.
 - Sync Automatically comes under that, then Update Mac (what Force Download was), with when it last downloaded beside it
 - Add Creator is on its own at the bottom, above the version
 - Request Older Videos is gone from Settings. A long creator's long-press menu and gallery still have Older Videos
+
+## 2026-11-07 · Android Auto (on the android-auto branch)
+
+- Curated now works in the car with Android Auto: Mixes, Categories and Creators, in grids of colorful mix tiles, category glyphs (each category its own color), creator pictures and video thumbnails. Short videos get a frame from the video as their thumbnail
+- Now Playing has speed, back 15 seconds, bookmark and Watch Later, and the video's thumbnail. Only the sound plays in the car
+- Up Next in Mixes shows what's coming and jumps to any of it, and search finds creators and videos, by voice too
+- In the car, videos always go on to the next one, whatever the autoplay settings, and the sound carries on when you leave the app on the phone. Disconnecting pauses it unless the phone is in use. The end of a mix shows the same message as the phone, sunshine included
+- The media notification and lock screen now show the video's thumbnail too
+
+## 2026-11-10 · A calmer sunshine panel
+
+- The end of a time-limited or Top mix, or of a creator's videos, is now a quiet daybreak: a twilight sky with a few stars warms to morning as a soft sun rises from behind layered hills, then the message fades up in the system font. The smiling sun, birds, flowers and bouncing letters are gone. With animations turned off it shows the finished scene, standing still

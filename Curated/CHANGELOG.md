@@ -341,3 +341,7 @@ Release of everything since 1.5: phone sync with the Fold and the new pairing sc
 - The export folder is checked whenever the section opens: if it's missing, it's outlined in red and Export stays off until you choose one
 - While an export runs, its card, the top of the section and the sidebar show a spinner, the progress, the time left and a Stop button
 - Exported videos are listed under a new iPod button beside Bookmarks in the sidebar, whose ⋯ menu has Mark All as Watched and Clear List
+
+## 2026-11-10 · Original audio on YouTube
+
+- YouTube downloads now keep the video's original audio. On channels YouTube auto-dubs, Curated could pick a dubbed track in another language (Russian, German, Arabic and others) because it ranked audio by bitrate alone
