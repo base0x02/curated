@@ -118,7 +118,7 @@ private fun carButtons(speed: Float, speedLocked: Boolean, bookmarked: Boolean):
     carButton(COMMAND_SPEED, "Speed", when (speed) { 1.5f -> R.drawable.ic_car_speed_15; 2f -> R.drawable.ic_car_speed_2; else -> R.drawable.ic_car_speed_1 }, !speedLocked),
     carButton(COMMAND_BACK, "Back 15 seconds", R.drawable.ic_car_back_15),
     carButton(COMMAND_BOOKMARK, if (bookmarked) "Remove bookmark" else "Bookmark", if (bookmarked) R.drawable.ic_car_bookmark else R.drawable.ic_car_bookmark_outline),
-    carButton(COMMAND_LATER, "Watch Later", R.drawable.ic_car_clock),
+    carButton(COMMAND_LATER, "Watch Later", R.drawable.ic_watch_later),
 )
 
 private fun carButton(command: String, name: String, icon: Int, enabled: Boolean = true): CommandButton =

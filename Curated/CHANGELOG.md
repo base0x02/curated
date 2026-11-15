@@ -345,3 +345,12 @@ Release of everything since 1.5: phone sync with the Fold and the new pairing sc
 ## 2026-11-10 · Original audio on YouTube
 
 - YouTube downloads now keep the video's original audio. On channels YouTube auto-dubs, Curated could pick a dubbed track in another language (Russian, German, Arabic and others) because it ranked audio by bitrate alone
+
+## 2026-11-15 · A new Watch Later icon
+
+- Watch Later now uses a bouncing forward arrow instead of the tray, everywhere it appears: Home, the player's buttons, the saved mark, the "Later" labels and the menus
+
+## 2026-11-15 · Latest as a gallery
+
+- Latest for long videos now opens as a grid of thumbnails, like a creator's gallery, with each card naming its creator. Picking a video plays the list from there, and a back button returns to the grid
+- The main Latest puts the unwatched Suggestions playlist first, in its own order, then every other unwatched long video, creators' and playlists' alike, newest first. A category's Latest is its creators' videos, hand-picked ones first. Its unwatched count on Home matches the list

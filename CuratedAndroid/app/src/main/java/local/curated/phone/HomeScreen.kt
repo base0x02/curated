@@ -1,5 +1,6 @@
 package local.curated.phone
 
+import androidx.compose.ui.res.vectorResource
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -16,7 +17,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Replay
-import androidx.compose.material.icons.filled.MoveToInbox
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
@@ -171,8 +171,8 @@ fun HomeScreen(open: (Screen) -> Unit, mixButtonsInBar: Boolean = false) {
                                     ) { startMix(PlaybackMode.Top(null)) }
                                 } else {
                                     BarMixButton(
-                                        Icons.Filled.Schedule, LogoRed, "Latest", button, zoom, on = playing == PlaybackMode.Latest(null),
-                                    ) { startMix(PlaybackMode.Latest(null)) }
+                                        Icons.Filled.Schedule, LogoRed, "Latest", button, zoom, on = false,
+                                    ) { open(Screen.Latest(null)) }
                                     BarMixButton(
                                         Icons.Filled.Shuffle, second, "Automix", button, zoom,
                                         on = playing is PlaybackMode.Automix && playing.category == null && playing.form == VideoForm.LONG,
@@ -268,11 +268,11 @@ fun HomeScreen(open: (Screen) -> Unit, mixButtonsInBar: Boolean = false) {
                             ) { startMix(PlaybackMode.Top(null)) }
                         } else {
                             // Long videos: Latest (newest first) and Automix; no Top list.
-                            val unwatched = state.mixLibraries(null, VideoForm.LONG).sumOf { state.unplayedCount(it) }
+                            val unwatched = state.latestVideos(null).size
                             WatchTile(
                                 Icons.Filled.Schedule, LogoRed, "Latest", if (unwatched > 0) "$unwatched unwatched" else "All caught up",
                                 Modifier.weight(1f),
-                            ) { startMix(PlaybackMode.Latest(null)) }
+                            ) { open(Screen.Latest(null)) }
                             WatchTile(
                                 Icons.Filled.Shuffle, second, "Automix", "Mixed creators", Modifier.weight(1f),
                                 onLongClick = { picking = MixPick.AUTOMIX },
@@ -291,7 +291,7 @@ fun HomeScreen(open: (Screen) -> Unit, mixButtonsInBar: Boolean = false) {
                             horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
                         ) {
                             if (laterCount > 0) {
-                                SavedButton(Icons.Filled.MoveToInbox, "Watch Later", laterCount, PlaybackMode.WatchLater(form), open)
+                                SavedButton(ImageVector.vectorResource(R.drawable.ic_watch_later), "Watch Later", laterCount, PlaybackMode.WatchLater(form), open)
                             }
                             if (bookmarkCount > 0) {
                                 SavedButton(Icons.Filled.Bookmark, "Bookmarks", bookmarkCount, PlaybackMode.Bookmarks(form), open)
@@ -669,7 +669,7 @@ private fun CreatorCard(
             if (category != null) {
                 val tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                 if (form == VideoForm.LONG) {
-                    IconButton(onClick = { startMix(PlaybackMode.Latest(category)) }) {
+                    IconButton(onClick = { open(Screen.Latest(category)) }) {
                         Icon(Icons.Filled.Schedule, contentDescription = "$title Latest", tint = tint)
                     }
                 }

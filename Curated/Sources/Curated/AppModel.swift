@@ -276,6 +276,21 @@ final class AppModel {
 
     func isPlayed(_ video: Video) -> Bool { played.contains(video.id) }
 
+    /// Long videos' Latest list, unwatched only. The main one: the Suggestions playlist first, in its order, then every
+    /// other long video, creators' and playlists' alike, newest first. A category's: its creators' videos newest first,
+    /// hand-picked ones first. Phones build the same list.
+    func latestVideos(in category: UUID?) -> [Video] {
+        guard category == nil else {
+            return handPickedFirst(Library.latestQueue(mixLibraries(.long, in: category), excluding: played))
+        }
+        let suggestions = longLibraries.first { $0.id == Creator.suggestions.id }?.videos.filter { !isPlayed($0) } ?? []
+        var seen = Set(suggestions.map(\.id))
+        let rest = longLibraries.filter { $0.id != Creator.suggestions.id }.flatMap(\.videos)
+            .filter { !isPlayed($0) && seen.insert($0.id).inserted }
+            .sorted { $0.date > $1.date }
+        return suggestions + rest
+    }
+
     func setPlayed(_ video: Video, _ value: Bool) {
         mark([video.id], played: value)
     }

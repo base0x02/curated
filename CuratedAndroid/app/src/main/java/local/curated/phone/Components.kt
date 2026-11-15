@@ -1,5 +1,7 @@
 package local.curated.phone
 
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.vectorResource
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
@@ -24,7 +26,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.MoveToInbox
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -231,7 +232,7 @@ fun VideoRow(
                     Icon(Icons.Filled.CheckCircle, null, tint = dim, modifier = Modifier.size(12.dp))
                     Text("Played ·", style = meta, color = dim)
                 } else if (isSaved) {
-                    Icon(Icons.Filled.MoveToInbox, null, tint = dim, modifier = Modifier.size(12.dp))
+                    Icon(ImageVector.vectorResource(R.drawable.ic_watch_later), null, tint = dim, modifier = Modifier.size(12.dp))
                     Text("Later ·", style = meta, color = dim)
                 }
                 Text(videoMeta(video), style = meta, color = dim, maxLines = 1)

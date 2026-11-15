@@ -325,7 +325,7 @@ struct PlayerScreen: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Playback speed \(formatSpeed(playback.shownSpeed))")
             .speedLock(playback.speedLocked)
-            GlassIconButton(symbol: "tray.and.arrow.down", label: "Watch Later") { playback.saveForLater() }
+            GlassIconButton(symbol: "arrowshape.bounce.forward", label: "Watch Later") { playback.saveForLater() }
                 .disabled(playback.finished)
             let bookmarked = app.isBookmarked(video)
             GlassIconButton(symbol: bookmarked ? "bookmark.fill" : "bookmark", label: bookmarked ? "Bookmarked. Remove bookmark" : "Bookmark") {
@@ -603,7 +603,7 @@ struct PlayerScreen: View {
             VStack(spacing: 0) {
                 Button {
                     if saved { app.setWatchLater([video], false) } else { playback.saveForLater() }
-                } label: { pillIcon(saved ? "tray.and.arrow.down.fill" : "tray.and.arrow.down") }
+                } label: { pillIcon(saved ? "arrowshape.bounce.forward.fill" : "arrowshape.bounce.forward") }
                     .disabled(playback.finished && !saved)
                     .accessibilityLabel(saved ? "In Watch Later. Remove from Watch Later" : "Watch Later")
                 Button { playback.toggleBookmark() } label: { pillIcon(bookmarked ? "bookmark.fill" : "bookmark") }
@@ -640,7 +640,7 @@ struct PlayerScreen: View {
             }
             .accessibilityLabel("Playback speed \(formatSpeed(playback.shownSpeed))")
             .speedLock(playback.speedLocked)
-            Button { playback.saveForLater() } label: { Image(systemName: "tray.and.arrow.down") }
+            Button { playback.saveForLater() } label: { Image(systemName: "arrowshape.bounce.forward") }
                 .disabled(playback.finished)
                 .accessibilityLabel("Watch Later")
             BookmarkButton(video: video)
@@ -1094,6 +1094,27 @@ struct HingeReader: UIViewRepresentable {
             view.addInteraction(UIHingeInteraction { _, update in
                 let open = update.hinge?.status == .partiallyOpen
                 if binding.wrappedValue != open { binding.wrappedValue = open }
+            })
+        }
+        #endif
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {}
+}
+
+/// Calls `found` once the device reports a hinge (iPhone Duo). Never before iOS 27.1, or on devices without one.
+struct FoldableReader: UIViewRepresentable {
+    let found: () -> Void
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        #if canImport(SwiftUI, _version: 8.0.85)
+        if #available(iOS 27.1, *) {
+            let found = found
+            view.addInteraction(UIHingeInteraction { _, update in
+                if update.hinge != nil { found() }
             })
         }
         #endif

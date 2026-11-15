@@ -58,7 +58,8 @@ struct CuratedApp: App {
             router.settingsShown = true
         } else if stayHome {
         } else if openLatest {
-            router.open(.player(.latest(nil)))  // For tests: -curatedLong opens the long Home's Latest.
+            app.form = .long
+            router.open(.latest(nil))  // For tests: -curatedLong opens the long Home's Latest.
         } else if app.automixCount(in: nil) > 0 {
             router.open(.player(.automix(nil)))
         }
@@ -115,6 +116,13 @@ enum Route: Hashable {
     case creator(String)
     /// A long-video creator's or playlist's gallery.
     case gallery(String)
+    /// Long videos' Latest (or a category's) as a gallery.
+    case latest(String?)
+}
+
+/// What the sideways layout's right pane shows in place of a player: Latest's gallery.
+struct SideLatest: Hashable {
+    let category: String?
 }
 
 @Observable
@@ -135,12 +143,17 @@ final class Router {
     var sideways = false
     /// The queue the sideways player shows (nil for whatever's loaded).
     var sidePlayer: PlaybackMode?
+    /// Latest's gallery in the sideways right pane, in place of the player. Opening a player clears it.
+    var sideLatest: SideLatest?
     /// The player's queue sheet is up. Here so the sideways tray's Queue button can open it too.
     var queueShown = false
 
     func open(_ route: Route) {
         if sideways, case .player(let mode) = route {
             sidePlayer = mode
+            sideLatest = nil
+        } else if sideways, case .latest(let category) = route {
+            sideLatest = SideLatest(category: category)
         } else {
             path.append(route)
         }
@@ -158,27 +171,37 @@ struct RootView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     /// The sidebar selection in the wide layout.
     @State private var selection: PlaybackMode?
-    /// An iPhone (or iPhone Duo's outer display) turned sideways while a long video's player is open: just the video,
-    /// full screen. The app is otherwise upright only, so this follows how the phone is held, not the window.
+    /// A long video full screen from its full screen button, held sideways until its exit button (OrientationLock).
     @State private var turnedFullscreen = false
+    /// Full screen was left while turned sideways without the side-by-side layout: the upright layout until the window
+    /// is upright again.
+    @State private var turnedLongDismissed = false
     /// Whether the wide layout is showing; turning the phone only goes full screen from the phone layout.
     @State private var isWide = false
 
+    /// iPhone Duo's inner display: the only time an iPhone gets a regular width.
+    private var unfolded: Bool { UIDevice.current.userInterfaceIdiom == .phone && sizeClass == .regular }
+
     var body: some View {
         GeometryReader { geo in
-            // An iPhone only gets a regular width on iPhone Duo's inner display, which ignores the portrait-only
-            // orientation setting, so it's wide either way up.
             let landscape = geo.size.width > geo.size.height
             let phone = UIDevice.current.userInterfaceIdiom == .phone
+            // Settings: short videos may turn sideways; long videos get the side-by-side layouts when turned (or else
+            // play full screen). iPad and iPhone Duo's inner display may turn regardless: then the upright layout.
+            let landscapeAllowed = app.allowsLandscape(app.form, unfolded: unfolded)
+            let longLoaded = playback.current?.isLong == true
+            let turnedLong = landscape && !landscapeAllowed && app.form == .long && longLoaded
+                && !playback.isStockFullscreen && !turnedLongDismissed
+            let landscapeLayout = landscape && landscapeAllowed
             // Long videos on iPhone Duo's unfolded display in portrait use the phone's screens instead: Home, then a
             // creator's gallery, then the player, each with Back, and the queue sliding up from the bottom.
             // An iPhone on its side (a compact height): the screens on the left, the player beside them. Not while the
             // stock player is full screen from upright, which turns the phone itself.
-            let sideways = phone && landscape && verticalSizeClass == .compact && !playback.isStockFullscreen
-            let wide = !sideways && sizeClass == .regular && (phone ? landscape || app.form == .short : landscape)
+            let sideways = phone && landscapeLayout && verticalSizeClass == .compact && !playback.isStockFullscreen
+            let wide = !sideways && sizeClass == .regular && (phone ? landscapeLayout || app.form == .short : landscapeLayout)
             Group {
-                if turnedFullscreen && playback.current?.isLong == true {
-                    LongFullscreen { setTurnedFullscreen(false) }
+                if (turnedFullscreen || turnedLong) && longLoaded {
+                    LongFullscreen { leaveFullscreen() }
                 } else if sideways {
                     SidewaysLayout()
                         .environment(\.sideways, true)
@@ -186,14 +209,14 @@ struct RootView: View {
                 } else if wide {
                     WideLayout(selection: $selection)
                         // The Duo's landscape sidebar is wider than an iPad's: it's the only column beside the player.
-                        .environment(\.wideColumnWidth, phone && landscape ? min(380, geo.size.width * 0.45)
-                                                                          : min(340, geo.size.width * 0.34))
+                        .environment(\.wideColumnWidth, phone && landscapeLayout ? min(380, geo.size.width * 0.45)
+                                                                                : min(340, geo.size.width * 0.34))
                         // An unfolded iPhone Duo has about 670pt across in portrait: its sidebar slides out over the
                         // player. In landscape the sidebar stays and the queue slides up from the bottom instead.
-                        .environment(\.wideSidebarFloats, phone && !landscape)
-                        .environment(\.wideQueueAsSheet, phone && landscape)
+                        .environment(\.wideSidebarFloats, phone && !landscapeLayout)
+                        .environment(\.wideQueueAsSheet, phone && landscapeLayout)
                         // Landscape also moves the player's buttons into the toolbar down the side, per the HIG.
-                        .environment(\.wideSideToolbar, phone && landscape)
+                        .environment(\.wideSideToolbar, phone && landscapeLayout)
                         .environment(\.floatingSidebarWidth, min(420, geo.size.width * 0.66))
                 } else {
                     stack
@@ -215,9 +238,33 @@ struct RootView: View {
                     enterNarrow()
                 }
             }
+            // Upright, or allowed to turn again: the next turn goes full screen again.
+            .onChange(of: landscape && !landscapeAllowed) { _, stillTurned in if !stillTurned { turnedLongDismissed = false } }
+            // The app turns sideways for what Settings allow, and for a long video to go full screen.
+            .onChange(of: landscapeAllowed || (app.form == .long && longLoaded), initial: true) { _, allowed in
+                OrientationLock.setLandscapeAllowed(allowed, in: windowScene)
+            }
         }
         .onAppear { UIDevice.current.beginGeneratingDeviceOrientationNotifications() }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+            if UIDevice.current.orientation == .portrait { OrientationLock.releasePortrait(in: windowScene) }
+        }
+        // iPhone Duo: a hinge, so the turning settings are per display and allowed by default.
+        .background { FoldableReader { if !app.foldable { app.foldable = true } } }
         // Full screen (held sideways until its exit button, however the phone turns) ends if the long video does (stopped, or a short one started).
+        // Upright, long videos open on Latest (Home is one Back away); short videos go back to Home. Sideways, Latest
+        // takes the right pane instead. The wide layout picks its own (WideLayout).
+        .onChange(of: app.form) { _, form in
+            guard !isWide else { return }
+            if router.sideways {
+                if form == .long, router.sidePlayer?.form != .long { router.sideLatest = SideLatest(category: nil) }
+                if form == .short { router.sideLatest = nil }
+            } else if form == .long {
+                router.path = [.latest(nil)]
+            } else if router.path.contains(where: { if case .latest = $0 { true } else { false } }) {
+                router.path = []
+            }
+        }
         .onChange(of: playback.current?.isLong == true) { _, isLong in if !isLong { setTurnedFullscreen(false) } }
         .overlay { mixPicker }
         .fullScreenCover(isPresented: Bindable(router).settingsShown) { SettingsView() }
@@ -276,6 +323,7 @@ struct RootView: View {
                     case .player(let mode): PlayerScreen(mode: mode)
                     case .creator(let username): CreatorView(username: username)
                     case .gallery(let username): LongCreatorView(username: username)
+                    case .latest(let category): LatestView(category: category)
                     }
                 }
         }
@@ -286,25 +334,52 @@ struct RootView: View {
         let open: PlaybackMode? = router.path.last { if case .player = $0 { true } else { false } }.flatMap {
             if case .player(let mode) = $0 { mode } else { nil }
         }
-        router.path.removeAll { if case .player = $0 { true } else { false } }
+        // Upright Latest moves to the right pane, unless a player was open over it.
+        let latest: SideLatest? = router.path.last.flatMap { if case .latest(let c) = $0 { SideLatest(category: c) } else { nil } }
+        router.path.removeAll {
+            switch $0 { case .player, .latest: true; default: false }
+        }
         router.sidePlayer = open ?? playback.mode
+        // Long videos with no player open: the main curated pane on the left, Latest beside it.
+        router.sideLatest = latest ?? (open == nil && app.form == .long ? SideLatest(category: nil) : nil)
         router.sideways = true
     }
 
     /// Upright again: the player for what's playing goes back on top of the screens.
     private func leaveSideways() {
         router.sideways = false
+        if let latest = router.sideLatest {
+            router.path.append(.latest(latest.category))
+            router.sideLatest = nil
+            router.sidePlayer = nil
+            return
+        }
         if playback.current != nil, let mode = router.sidePlayer ?? playback.mode, mode == playback.mode {
             router.path.append(.player(mode))
         }
         router.sidePlayer = nil
     }
 
+    private var windowScene: UIWindowScene? {
+        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+    }
+
     private func setTurnedFullscreen(_ on: Bool) {
         guard turnedFullscreen != on else { return }
         withAnimation(.snappy) { turnedFullscreen = on }
-        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
-        OrientationLock.lockLandscape(on, in: scene)
+        OrientationLock.lockLandscape(on, in: windowScene)
+    }
+
+    /// Full screen's exit button. Without the side-by-side layout, turned sideways would only go full screen again, so
+    /// it goes upright and stays there until the phone is held upright (or, where it can't be held, shows the upright
+    /// layout sideways).
+    private func leaveFullscreen() {
+        guard !app.allowsLandscape(app.form, unfolded: unfolded) else { return setTurnedFullscreen(false) }
+        withAnimation(.snappy) {
+            turnedFullscreen = false
+            turnedLongDismissed = true
+        }
+        OrientationLock.holdPortrait(in: windowScene)
     }
 
     /// Selects what's playing, or what the iPhone layout had open, or Automix.
@@ -318,6 +393,7 @@ struct RootView: View {
         case .player(let mode)? where mode.form == app.form: selection = mode
         case .creator(let username)? where app.form == .short: selection = .creator(username)
         case .gallery(let username)? where app.form == .long: selection = .longCreator(username)
+        case .latest(let category)? where app.form == .long: selection = .latest(category)
         default:
             if let selection, selection.form == app.form { return }
             selection = app.form == .long ? .latest(nil) : app.libraries.isEmpty ? nil : .automix(nil)
@@ -330,12 +406,15 @@ struct RootView: View {
             switch mode {
             case .creator(let username): router.path = [.creator(username), .player(mode)]
             case .longCreator(let username): router.path = [.gallery(username), .player(mode)]
+            case .latest(let category): router.path = [.latest(category), .player(mode)]
             default: router.path = [.player(mode)]
             }
         } else if case .creator(let username)? = selection, app.form == .short {
             router.path = [.creator(username)]
         } else if case .longCreator(let username)? = selection, app.form == .long {
             router.path = [.gallery(username)]
+        } else if app.form == .long {
+            if case .latest(let category)? = selection { router.path = [.latest(category)] } else { router.path = [.latest(nil)] }
         } else {
             router.path = []
         }

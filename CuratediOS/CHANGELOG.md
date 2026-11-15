@@ -263,3 +263,15 @@ The iPhone companion, caught up with the Android app (version in step with the M
 ## 2026-11-10 · A calmer sunshine panel
 
 - The end of a time-limited or Top mix, or of a creator's videos, is now a quiet daybreak: a twilight sky with a few stars warms to morning as a soft sun rises from behind layered hills, then the message fades up in the system font. The smiling sun, birds, flowers and bouncing letters are gone. With Reduce Motion it shows the finished scene, standing still
+
+## 2026-11-15 · A new Watch Later icon
+
+- Watch Later now uses a bouncing forward arrow instead of the tray, everywhere it appears: Home, the player's buttons, the saved mark, the "Later" labels and the menus
+
+## 2026-11-15 · Latest as a gallery, turning sideways, a fuller full screen
+
+- Latest for long videos now opens as a gallery of thumbnails, with the unwatched Suggestions first and then every other unwatched long video newest first, as on the Mac. On a phone held sideways it opens in the right pane
+- New in Settings → Playback: Turn Sideways for short videos (off keeps the app upright) and Side by Side When Sideways for long videos (off plays a long video full screen when the phone turns, unless Rotation Lock is on). They're on by default on iPad and iPhone Duo, where each is set separately for folded and unfolded, and off on other iPhones
+- Leaving a long video's full screen while held sideways keeps the app upright until the phone is turned upright
+- A long video full screen has the speed (a menu of speeds), picture in picture, bookmark and watched buttons at the top right. Double-tap the right side to skip ahead 10 seconds and the left to go back (each extra tap adds 10), hold the right side for 2×, and pinch to zoom: it holds with a tick where the video fills the screen, and one finger moves the picture while zoomed
+- The screen is only kept awake while a video is actually playing, not while it's stalled with nothing to play or waiting on the Up Next card

@@ -267,3 +267,12 @@ Version now tracks the Mac app.
 ## 2026-11-10 · A calmer sunshine panel
 
 - The end of a time-limited or Top mix, or of a creator's videos, is now a quiet daybreak: a twilight sky with a few stars warms to morning as a soft sun rises from behind layered hills, then the message fades up in the system font. The smiling sun, birds, flowers and bouncing letters are gone. With animations turned off it shows the finished scene, standing still
+
+## 2026-11-15 · Latest as a gallery, turning sideways, a fuller full screen
+
+- Watch Later now uses a bouncing forward arrow instead of the tray, everywhere it appears, Android Auto included
+- Latest for long videos now opens as a gallery with a row of creators on top, with the unwatched Suggestions first and then every other unwatched long video newest first, as on the Mac
+- New in Settings → Playback: Turn sideways for short videos (off keeps the app upright) and Two panes when sideways for long videos (off plays a long video full screen when the phone turns, unless auto-rotate is off). They're on by default on tablets and foldables, where each is set separately for folded and unfolded, and off on other phones. A Fold's inner screen may still turn, since Android 16 doesn't let apps hold big screens upright
+- Leaving a long video's full screen now keeps the app upright until the phone is turned upright, instead of letting it turn again after a moment
+- A long video full screen has a speed menu, picture in picture, bookmark and watched buttons beside its title. Holding a long video for 2× now works on the right side only, matching double-tap to skip
+- The screen no longer stays on after a long video ends on the Up Next card, or while a call or another app has the sound

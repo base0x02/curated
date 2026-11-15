@@ -253,6 +253,7 @@ private fun PlaybackPage() {
         "How long a Time Limit mix plays before suggesting some sunshine.",
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
     )
+    LandscapeSwitches(VideoForm.SHORT, "Turn sideways", "With this off, the app stays upright for short videos.")
     CategoryRules(VideoForm.SHORT)
 
     Spacer(Modifier.height(8.dp))
@@ -267,7 +268,27 @@ private fun PlaybackPage() {
         "Starts a video a little before where you left off.",
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
     )
+    LandscapeSwitches(
+        VideoForm.LONG, "Two panes when sideways",
+        "With this off, turning sideways plays the video full screen, unless auto-rotate is off.",
+    )
     CategoryRules(VideoForm.LONG)
+}
+
+/** One switch, or on a foldable one for each screen. A Fold's inner screen may turn even when it's off (Android 16). */
+@Composable
+private fun LandscapeSwitches(form: VideoForm, title: String, detail: String) {
+    val state = LocalContext.current.curated.state
+    if (state.foldable) {
+        SwitchRow("$title (folded)", detail, state.allowsLandscape(form, unfolded = false)) {
+            state.setAllowsLandscape(it, form, unfolded = false)
+        }
+        SwitchRow("$title (unfolded)", detail, state.allowsLandscape(form, unfolded = true)) {
+            state.setAllowsLandscape(it, form, unfolded = true)
+        }
+    } else {
+        SwitchRow(title, detail, state.allowsLandscape(form, unfolded = false)) { state.setAllowsLandscape(it, form, unfolded = false) }
+    }
 }
 
 @Composable

@@ -197,7 +197,7 @@ struct VideoRow: View {
                         Label("Watched", systemImage: "checkmark.circle.fill")
                         Text("·")
                     } else if saved {
-                        Label("Later", systemImage: "tray.and.arrow.down.fill")
+                        Label("Later", systemImage: "arrowshape.bounce.forward.fill")
                         Text("·")
                     }
                     Text(metaText)

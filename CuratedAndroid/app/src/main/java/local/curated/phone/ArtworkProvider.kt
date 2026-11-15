@@ -51,7 +51,7 @@ enum class Tile(@param:DrawableRes val icon: Int, val from: Long, val to: Long) 
     Automix(R.drawable.ic_car_shuffle, 0xFFE8344E, 0xFFFF7A45),
     Top(R.drawable.ic_car_star, 0xFF19C3D6, 0xFF0A84FF),
     Vine(R.drawable.vine_glyph, 0xFF00B488, 0xFF19C37D),
-    WatchLater(R.drawable.ic_car_clock, 0xFFFF9F0A, 0xFFFF5E3A),
+    WatchLater(R.drawable.ic_watch_later, 0xFFFF9F0A, 0xFFFF5E3A),
     Bookmarks(R.drawable.ic_car_bookmark, 0xFFEC4899, 0xFF8C4DF2),
     Queue(R.drawable.ic_car_queue, 0xFF475569, 0xFF1E293B),
     Sunshine(R.drawable.ic_car_sun, 0xFFFFC53D, 0xFFFF7A18),

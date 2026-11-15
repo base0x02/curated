@@ -17,6 +17,10 @@ import android.os.PowerManager
 import android.util.Rational
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import android.content.pm.ActivityInfo
+import android.view.OrientationEventListener
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -53,6 +57,7 @@ import androidx.window.layout.WindowInfoTracker
 import androidx.compose.material3.MaterialTheme
 import androidx.core.view.WindowCompat
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.darkColorScheme
@@ -119,6 +124,7 @@ class MainActivity : ComponentActivity() {
                     isAppearanceLightNavigationBars = !darkBars
                 }
             }
+            OrientationEffects()
             MaterialTheme(colorScheme = if (dark) DarkColors else LightColors) {
                 CompositionLocalProvider(LocalDarkTheme provides dark) {
                     Crossfade(targetState = state.onboarding, animationSpec = tween(600), label = "onboarding") { onboarding ->
@@ -150,11 +156,45 @@ class MainActivity : ComponentActivity() {
         }
         // Stop the screen sleeping while a video plays, on any screen (full player, mini player or PiP).
         lifecycleScope.launch {
-            snapshotFlow { playback.playWhenReady && playback.current != null && !playback.finished }
+            snapshotFlow { playback.keepsScreenOn && playback.current != null && !playback.finished && !playback.awaitingNext }
                 .collect { awake ->
                     if (awake) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                     else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 }
+        }
+    }
+
+    /**
+     * Which ways the window may turn: held sideways while a long video is full screen from its button; upright after
+     * leaving full screen until the phone is held upright; otherwise as Settings allow for what's showing, or freely
+     * while a long video is loaded so turning can play it full screen. Turning freely follows the phone's auto-rotate
+     * setting. Android 16 ignores this on big screens (a Fold's inner screen, tablets), which turn anyway.
+     */
+    @Composable
+    private fun OrientationEffects() {
+        val state = curated.state
+        val config = LocalConfiguration.current
+        val unfolded = state.foldable && config.smallestScreenWidthDp >= 600
+        val longLoaded = playback.current?.form == VideoForm.LONG
+        val orientation = when {
+            playback.fullscreen && !playback.fullscreenFromTurn && longLoaded -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            playback.portraitHeld -> ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT
+            state.allowsLandscape(state.form, unfolded) || (state.form == VideoForm.LONG && longLoaded) ->
+                ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            else -> ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT
+        }
+        LaunchedEffect(orientation) { if (requestedOrientation != orientation) requestedOrientation = orientation }
+        // Lets go of the upright hold once the phone is held upright.
+        val held = playback.portraitHeld
+        DisposableEffect(held) {
+            if (!held) return@DisposableEffect onDispose {}
+            val watcher = object : OrientationEventListener(this@MainActivity) {
+                override fun onOrientationChanged(degrees: Int) {
+                    if (degrees != ORIENTATION_UNKNOWN && (degrees <= 25 || degrees >= 335)) playback.portraitHeld = false
+                }
+            }
+            if (watcher.canDetectOrientation()) watcher.enable() else playback.portraitHeld = false
+            onDispose { watcher.disable() }
         }
     }
 
@@ -275,6 +315,8 @@ sealed interface Screen {
     data object Home : Screen
     data class Player(val mode: PlaybackMode) : Screen
     data class Creator(val username: String, val form: VideoForm = VideoForm.SHORT) : Screen
+    /** Long videos' Latest (or a category's) as a gallery. In two panes it's the right-hand pane, like a player. */
+    data class Latest(val category: String?) : Screen
     data object Settings : Screen
 }
 
@@ -294,6 +336,24 @@ fun CuratedRoot(stack: SnapshotStateList<Screen>, fold: FoldingFeature?) {
     val context = LocalContext.current
     val playback = context.curated.playback
     // A long video full screen covers whichever layout is underneath (one pane, two panes or tabletop).
+    val state = context.curated.state
+    val config = LocalConfiguration.current
+    // Turned sideways with two panes off for long videos (Settings) and a long video loaded: it plays full screen,
+    // until the phone is turned upright or full screen is left (then held upright; see MainActivity).
+    val unfolded = state.foldable && config.smallestScreenWidthDp >= 600
+    val turnedLong = config.screenWidthDp > config.screenHeightDp && state.form == VideoForm.LONG &&
+        playback.current?.form == VideoForm.LONG && !state.allowsLandscape(VideoForm.LONG, unfolded) && !playback.portraitHeld &&
+        stack.last() != Screen.Settings && state.olderVideos == null && !state.addingCreator
+    LaunchedEffect(turnedLong) {
+        if (turnedLong && !playback.fullscreen) {
+            playback.fullscreenFromTurn = true
+            playback.fullscreenFromPortrait = false
+            playback.fullscreen = true
+        } else if (!turnedLong && playback.fullscreen && playback.fullscreenFromTurn) {
+            playback.fullscreen = false
+            playback.fullscreenFromTurn = false
+        }
+    }
     val fullscreen = playback.fullscreen && playback.current?.form == VideoForm.LONG
     FullscreenEffects(fullscreen)
     // Leave it if what's playing stops being a long video (stopped, or a short one started).
@@ -308,13 +368,14 @@ fun CuratedRoot(stack: SnapshotStateList<Screen>, fold: FoldingFeature?) {
         val windowWidth = maxWidth
 
         fun open(screen: Screen) {
-            // The player pane shows one queue, so there's only ever one player on the stack.
-            if (wide && screen is Screen.Player) stack.removeAll { it is Screen.Player }
+            // The right pane shows one queue or Latest, so there's only ever one of them on the stack.
+            if (wide && (screen is Screen.Player || screen is Screen.Latest)) stack.removeAll { it is Screen.Player || it is Screen.Latest }
+            if (!wide && screen is Screen.Latest) stack.removeAll { it is Screen.Latest }
             stack.add(screen)
         }
-        /** In two panes Back steps back through the left pane; the player stays. */
+        /** In two panes Back steps back through the left pane; the player (or Latest) stays. */
         val backTarget: Int? =
-            if (wide) stack.indices.lastOrNull { it > 0 && stack[it] !is Screen.Player }
+            if (wide) stack.indices.lastOrNull { it > 0 && stack[it] !is Screen.Player && stack[it] !is Screen.Latest }
             else stack.lastIndex.takeIf { it > 0 }
         fun back() {
             backTarget?.let { stack.removeAt(it) }
@@ -322,6 +383,19 @@ fun CuratedRoot(stack: SnapshotStateList<Screen>, fold: FoldingFeature?) {
         BackHandler(enabled = backTarget != null) { back() }
 
         val appState = context.curated.state
+        // Long videos open on Latest: upright it's on top of Home (one Back away), in two panes beside it. Back to
+        // short videos, it goes. Only on a switch, so turning the phone doesn't bring it back.
+        var lastForm by rememberSaveable { mutableStateOf(appState.form) }
+        LaunchedEffect(appState.form) {
+            if (appState.form == lastForm) return@LaunchedEffect
+            lastForm = appState.form
+            if (appState.form == VideoForm.LONG) {
+                if (wide) stack.removeAll { it is Screen.Player || it is Screen.Latest } else stack.removeAll { it is Screen.Latest }
+                stack.add(Screen.Latest(null))
+            } else {
+                stack.removeAll { it is Screen.Latest }
+            }
+        }
         appState.olderVideos?.let { target ->
             OlderVideosScreen(target) { appState.olderVideos = null }
             return@BoxWithConstraints
@@ -355,6 +429,11 @@ fun CuratedRoot(stack: SnapshotStateList<Screen>, fold: FoldingFeature?) {
                 Screen.Home -> HomeScreen(open = ::open)
                 is Screen.Player -> PlayerScreen(mode = screen.mode, onBack = ::back)
                 is Screen.Creator -> CreatorScreen(username = screen.username, form = screen.form, open = ::open, onBack = ::back)
+                is Screen.Latest -> LatestScreen(
+                    screen.category, open = ::open, onBack = ::back,
+                    // All in its row of creators: back to Home.
+                    home = { while (stack.size > 1) stack.removeAt(stack.lastIndex) },
+                )
                 Screen.Settings -> {}
             }
             return@BoxWithConstraints
@@ -367,8 +446,11 @@ fun CuratedRoot(stack: SnapshotStateList<Screen>, fold: FoldingFeature?) {
         // A phone held sideways (a Fold's cover screen), not a tablet or a Fold's inner screen: the video's details
         // and main controls move into the left pane, under the screens, and Home's top bar takes the mix buttons.
         val sideways = maxHeight < 600.dp
-        // The open player, or else whatever's loaded (paused after Back on a phone, say).
-        val mode = stackedPlayer ?: playback.mode
+        // Latest, when it's the last thing opened on the right; otherwise the open player, or else whatever's loaded
+        // (paused after Back on a phone, say).
+        val latest = stack.lastOrNull { it is Screen.Player || it is Screen.Latest } as? Screen.Latest
+            ?: Screen.Latest(null).takeIf { appState.form == VideoForm.LONG && stackedPlayer == null && playback.mode == null }
+        val mode = if (latest != null) null else stackedPlayer ?: playback.mode
         val paneWidth = hinge?.first ?: (windowWidth * 0.42f).coerceIn(320.dp, 440.dp)
         val leftWidth = when {
             mode?.form != VideoForm.SHORT -> paneWidth
@@ -386,10 +468,10 @@ fun CuratedRoot(stack: SnapshotStateList<Screen>, fold: FoldingFeature?) {
                 CompositionLocalProvider(LocalTwoPane provides true) {
                     // The side controls sit over the navigation bar, so the screen above them needn't.
                     Box(Modifier.weight(1f).then(if (sideControls) Modifier.consumeWindowInsets(WindowInsets.navigationBars) else Modifier)) {
-                        when (val screen = stack.lastOrNull { it !is Screen.Player } ?: Screen.Home) {
+                        when (val screen = stack.lastOrNull { it !is Screen.Player && it !is Screen.Latest } ?: Screen.Home) {
                             Screen.Home -> HomeScreen(open = ::open, mixButtonsInBar = sideways)
                             is Screen.Creator -> CreatorScreen(username = screen.username, form = screen.form, open = ::open, onBack = ::back)
-                            Screen.Settings, is Screen.Player -> {}
+                            Screen.Settings, is Screen.Player, is Screen.Latest -> {}
                         }
                     }
                     if (sideControls) PlayerSideControls()
@@ -401,7 +483,9 @@ fun CuratedRoot(stack: SnapshotStateList<Screen>, fold: FoldingFeature?) {
                 Box(Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)))
             }
             Box(Modifier.weight(1f).fillMaxHeight().background(Color.Black)) {
-                if (mode != null) {
+                if (latest != null) {
+                    key(latest) { LatestScreen(latest.category, open = ::open, onBack = null) }
+                } else if (mode != null) {
                     key(mode) {
                         PlayerScreen(mode, onBack = {}, layout = if (sideways) PlayerLayout.Side else PlayerLayout.Pane)
                     }

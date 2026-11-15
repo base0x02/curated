@@ -34,7 +34,7 @@ struct SidewaysLayout: View {
             let trailingInset = geo.safeAreaInsets.trailing
             let columnInset = islandOnRight && trailingInset > 0 ? trailingInset - 4 : 14
             let columnRoom = Self.buttonWidth + columnInset + 6
-            let leftWidth = mode?.form == .short
+            let leftWidth = router.sideLatest == nil && mode?.form == .short
                 ? min(paneWidth * 1.35, geo.size.width + trailingInset - shortVideoWidth - columnRoom)
                 : min(geo.size.width * 0.7, paneWidth)
             HStack(spacing: 0) {
@@ -47,6 +47,8 @@ struct SidewaysLayout: View {
                                 case .player: EmptyView()
                                 case .creator(let username): CreatorView(username: username)
                                 case .gallery(let username): LongCreatorView(username: username)
+                                // Latest opens in the pane on the right too.
+                                case .latest: EmptyView()
                                 }
                             }
                     }
@@ -55,7 +57,11 @@ struct SidewaysLayout: View {
                 .frame(width: leftWidth)
                 ZStack {
                     Color.black.ignoresSafeArea()
-                    if let mode {
+                    if let latest = router.sideLatest {
+                        NavigationStack { LatestView(category: latest.category) }
+                            .environment(\.colorScheme, .dark)
+                            .id(latest)
+                    } else if let mode {
                         PlayerScreen(mode: mode).id(mode)
                     } else {
                         Text("Pick a mix or a creator to start watching.")

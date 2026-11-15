@@ -627,8 +627,13 @@ final class Playback: NSObject {
     }
 
     /// Stops the screen sleeping while a video plays, on any screen (full player, mini player or picture in picture).
+    /// Only while a video is actually moving (or briefly loading): a player left wanting to play with nothing to play,
+    /// or one waiting on the Up Next card, lets the screen sleep.
     private func updateScreenAwake() {
-        UIApplication.shared.isIdleTimerDisabled = isPlaying && current != nil && !finished
+        let status = player.timeControlStatus
+        let moving = status == .playing
+            || (status == .waitingToPlayAtSpecifiedRate && player.reasonForWaitingToPlay != .noItemToPlay)
+        UIApplication.shared.isIdleTimerDisabled = moving && current != nil && !finished && !awaitingNext
     }
 
     // MARK: Speed
@@ -637,6 +642,12 @@ final class Playback: NSObject {
     func cycleSpeed() {
         let i = Self.speeds.firstIndex(of: speed) ?? 0
         speed = Self.speeds[(i + 1) % Self.speeds.count]
+        applySpeed()
+    }
+
+    /// A speed picked from a menu (the full screen player's).
+    func setSpeed(_ value: Float) {
+        speed = value
         applySpeed()
     }
 

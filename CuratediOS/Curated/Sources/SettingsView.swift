@@ -213,10 +213,11 @@ private struct PlaybackSettings: View {
                     }
                 }
                 .accessibilityIdentifier("timeLimit")
+                landscapeToggles(.short, title: "Turn Sideways")
             } header: {
                 formHeader("Short Videos", mark: .short)
             } footer: {
-                Text("With Autoplay off, each video plays on a loop. Time Limit is how long a Time Limit mix plays before suggesting some sunshine.")
+                Text("With Autoplay off, each video plays on a loop. Time Limit is how long a Time Limit mix plays before suggesting some sunshine. With Turn Sideways off, the app stays upright for short videos.")
             }
             CategoryRulesSection(form: .short)
 
@@ -231,10 +232,11 @@ private struct PlaybackSettings: View {
                     }
                 }
                 .accessibilityIdentifier("resumeRewind")
+                landscapeToggles(.long, title: "Side by Side When Sideways")
             } header: {
                 formHeader("Long Videos", mark: .long)
             } footer: {
-                Text("With Autoplay off, a video stops at its end with an Up Next card. Backing up starts a video a little before where you left off.")
+                Text("With Autoplay off, a video stops at its end with an Up Next card. Backing up starts a video a little before where you left off. With Side by Side off, turning sideways plays the video full screen, unless Rotation Lock is on.")
             }
             CategoryRulesSection(form: .long)
         }
@@ -242,6 +244,24 @@ private struct PlaybackSettings: View {
         .navigationBarTitleDisplayMode(.inline)
         // See what another device changed. If the Mac can't be reached, these still work here.
         .task { await app.exchangePositions() }
+    }
+
+    /// One toggle, or on a foldable one for each display.
+    @ViewBuilder
+    private func landscapeToggles(_ form: VideoForm, title: String) -> some View {
+        if app.foldable {
+            landscapeToggle(form, unfolded: false, title: "\(title) Folded")
+            landscapeToggle(form, unfolded: true, title: "\(title) Unfolded")
+        } else {
+            landscapeToggle(form, unfolded: false, title: title)
+        }
+    }
+
+    private func landscapeToggle(_ form: VideoForm, unfolded: Bool, title: String) -> some View {
+        Toggle(title, isOn: Binding(
+            get: { app.allowsLandscape(form, unfolded: unfolded) },
+            set: { app.setAllowsLandscape($0, form, unfolded: unfolded) }))
+            .accessibilityIdentifier("landscape-\(form.rawValue)\(unfolded ? "-unfolded" : "")")
     }
 
     private func formHeader(_ title: String, mark: CuratedMark.Kind) -> some View {

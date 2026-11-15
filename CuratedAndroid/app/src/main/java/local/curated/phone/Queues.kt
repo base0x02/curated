@@ -12,7 +12,7 @@ object Queues {
             ),
         )
         is PlaybackMode.VineAutomix -> automix(state.vineLibraries, state.played + state.bookmarkedIds)
-        is PlaybackMode.Latest -> state.handPickedFirst(latest(state.mixLibraries(mode.category, VideoForm.LONG), state.played))
+        is PlaybackMode.Latest -> state.latestVideos(mode.category)
         is PlaybackMode.Top -> top(
             mode.picked?.let { state.mixLibraries(it, VideoForm.SHORT) } ?: state.mixLibraries(mode.category, VideoForm.SHORT),
             state.played, PlaybackMode.topCount(mode.category),

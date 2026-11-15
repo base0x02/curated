@@ -261,7 +261,7 @@ struct WideLayout: View {
                     let unwatched = app.latestCount(in: nil)
                     WatchTile(symbol: "clock", tint: .logoRed, title: "Latest",
                               subtitle: unwatched > 0 ? "\(unwatched) unwatched" : "All caught up",
-                              selected: selection == .latest(nil)) { startMix(.latest(nil)) }
+                              selected: selection == .latest(nil)) { open(.latest(nil)) }
                     WatchTile(symbol: "shuffle", tint: .topTint, title: "Automix", subtitle: "Mixed creators",
                               selected: selection == .longAutomix(nil), hold: { router.pick(.longAutomix) }) { startMix(.longAutomix(nil)) }
                 } else {
@@ -279,7 +279,7 @@ struct WideLayout: View {
                 HStack(spacing: 10) {
                     Spacer()
                     if laterCount > 0 {
-                        SavedButton(symbol: "tray.and.arrow.down", title: "Watch Later", mode: later, onPick: playSaved)
+                        SavedButton(symbol: "arrowshape.bounce.forward", title: "Watch Later", mode: later, onPick: playSaved)
                     }
                     if bookmarkCount > 0 {
                         SavedButton(symbol: "bookmark.fill", title: "Bookmarks", mode: bookmarks, onPick: playSaved)
@@ -320,6 +320,8 @@ struct WideLayout: View {
             CreatorDetail(username: username)
         case .longCreator(let username)?:
             LongCreatorDetail(username: username)
+        case .latest(let category)?:
+            LatestDetail(category: category)
         case let mode?:
             QueueDetail(mode: mode)
         case nil:
@@ -331,7 +333,7 @@ struct WideLayout: View {
 /// The logo and sync button pinned over the top of the sidebar. Cards scrolling under it blur and fade toward the
 /// top of the screen (the system's scroll edge effect); at rest it's the sidebar's own color. Before iOS 26, a
 /// frosted band fades in once the list scrolls.
-private struct SidebarHeader<Header: View>: ViewModifier {
+struct SidebarHeader<Header: View>: ViewModifier {
     @ViewBuilder let header: () -> Header
     @State private var scrolled = false
 
@@ -616,7 +618,7 @@ struct SideToolbar<MixItems: View>: ViewModifier {
 
     @ViewBuilder private func savedItems(_ video: Video) -> some View {
         let played = app.isPlayed(video)
-        Button { playback.saveForLater() } label: { Label("Watch Later", systemImage: "tray.and.arrow.down") }
+        Button { playback.saveForLater() } label: { Label("Watch Later", systemImage: "arrowshape.bounce.forward") }
             .disabled(playback.finished)
         let bookmarked = app.isBookmarked(video)
         Button { playback.toggleBookmark() } label: {
@@ -864,7 +866,7 @@ private struct QueueList: View {
                                 if app.isSavedForLater(video) {
                                     Button("Remove from Watch Later", systemImage: "tray.and.arrow.up") { app.setWatchLater([video], false) }
                                 } else {
-                                    Button("Save to Watch Later", systemImage: "tray.and.arrow.down") { app.setWatchLater([video], true) }
+                                    Button("Save to Watch Later", systemImage: "arrowshape.bounce.forward") { app.setWatchLater([video], true) }
                                 }
                             }
                             if app.isBookmarked(video) {
@@ -1093,7 +1095,7 @@ struct PlayerPane: View {
             }
             .accessibilityLabel("Playback speed \(formatSpeed(playback.shownSpeed))")
             .speedLock(playback.speedLocked)
-            Button { playback.saveForLater() } label: { Image(systemName: "tray.and.arrow.down") }
+            Button { playback.saveForLater() } label: { Image(systemName: "arrowshape.bounce.forward") }
                 .disabled(playback.finished)
                 .keyboardShortcut("l", modifiers: .command)
                 .accessibilityLabel("Watch Later")
@@ -1113,7 +1115,7 @@ struct PlayerPane: View {
         case .automix?, .longAutomix?: return ("Automix", "shuffle")
         case .vineAutomix?: return ("Vine Automix", "shuffle")
         case .latest?: return ("Latest · \(i + 1) of \(playback.queue.count)", "clock")
-        case .watchLater?, .longWatchLater?: return ("\(i + 1) of \(playback.queue.count)", "tray.and.arrow.down")
+        case .watchLater?, .longWatchLater?: return ("\(i + 1) of \(playback.queue.count)", "arrowshape.bounce.forward")
         case .bookmarks?, .longBookmarks?: return ("\(i + 1) of \(playback.queue.count)", "bookmark")
         case .top?: return ("\(i + 1) of \(playback.queue.count)", "star")
         default: return nil
@@ -1236,6 +1238,93 @@ private struct LongCreatorDetail: View {
         QueueList(videos: library.map(app.longVideos) ?? [], showCreator: library?.creator.isPlaylist == true,
                   emptyText: "Videos appear here after the next sync.") { index in
             if let library { playback.start(app.longVideos(library), at: index, mode: mode) }
+            showQueue = false
+        }
+    }
+}
+
+/// Latest in the wide layout: its gallery beside the sidebar, as a creator's is (LongCreatorDetail). Picking a video
+/// plays the list from there with the queue beside it; All Videos goes back to the gallery.
+private struct LatestDetail: View {
+    @Environment(AppState.self) private var app
+    @Environment(Playback.self) private var playback
+    @Environment(\.wideColumnWidth) private var columnWidth
+    @Environment(\.wideQueueAsSheet) private var queueAsSheet
+    @Environment(\.toggleSidebar) private var toggleSidebar
+    let category: String?
+    @AppStorage("queueHidden") private var queueHidden = false
+    @State private var showGallery = true
+    @State private var showQueue = false
+
+    private var mode: PlaybackMode { .latest(category) }
+    private var isLoaded: Bool { playback.mode == mode && playback.current != nil }
+    private var ended: Bool { playback.awaitingNext || playback.finished }
+
+    var body: some View {
+        Group {
+            if showGallery || !isLoaded {
+                gallery
+            } else {
+                player
+            }
+        }
+        .onAppear { showGallery = !(isLoaded && !ended) }
+        .onChange(of: ended) { _, ended in
+            if ended && isLoaded { withAnimation(.snappy) { showGallery = true } }
+        }
+    }
+
+    private var gallery: some View {
+        LatestGallery(category: category) { videos, index in
+            playback.start(videos, at: index, mode: mode)
+            withAnimation(.snappy) { showGallery = false }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            // iPhone Duo in portrait: the sidebar button, as the player's top bar would have it.
+            if let toggleSidebar {
+                GlassIconButton(symbol: "line.3.horizontal", label: "Show Sidebar", action: toggleSidebar.callAsFunction)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+            }
+        }
+    }
+
+    private var player: some View {
+        HStack(spacing: 0) {
+            if !queueHidden && !queueAsSheet {
+                queueList.frame(width: columnWidth).transition(.move(edge: .leading))
+                Divider()
+            }
+            PlayerPane()
+                .overlay(alignment: .top) {
+                    PlayerTopBar(title: LatestGallery.title(category, app),
+                                 subtitle: "\(app.latestCount(in: category)) unwatched") {
+                        AutoplayButton()
+                        GlassIconButton(symbol: "square.grid.2x2", label: "All Videos") {
+                            playback.pause()
+                            withAnimation(.snappy) { showGallery = true }
+                        }
+                    }
+                    .environment(\.showQueueSheet, queueAsSheet ? ViewAction { showQueue = true } : nil)
+                }
+        }
+        .modifier(SideToolbar(showQueue: { showQueue = true }) {
+            Button {
+                playback.pause()
+                withAnimation(.snappy) { showGallery = true }
+            } label: {
+                Label("All Videos", systemImage: "square.grid.2x2")
+            }
+        })
+        .sheet(isPresented: $showQueue) { QueueListSheet { queueList } }
+    }
+
+    /// The queue as it was started, so videos watched along the way stay in their place.
+    private var queueList: some View {
+        QueueList(videos: playback.queue, showCreator: true,
+                  emptyText: "New long videos appear here after the next sync.") { index in
+            playback.start(playback.queue, at: index, mode: mode)
             showQueue = false
         }
     }

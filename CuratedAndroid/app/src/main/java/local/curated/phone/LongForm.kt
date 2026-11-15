@@ -1,5 +1,7 @@
 package local.curated.phone
 
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.vectorResource
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
@@ -22,7 +24,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.MoveToInbox
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -139,7 +140,7 @@ fun LongVideoMeta(video: Video) {
                 Text("Watched ·", style = style, color = dim)
             }
             state.isSavedForLater(video) -> {
-                Icon(Icons.Filled.MoveToInbox, null, tint = dim, modifier = Modifier.size(12.dp))
+                Icon(ImageVector.vectorResource(R.drawable.ic_watch_later), null, tint = dim, modifier = Modifier.size(12.dp))
                 Text("Later ·", style = style, color = dim)
             }
         }
@@ -182,10 +183,16 @@ fun LongVideoRow(video: Video, isCurrent: Boolean, showCreator: Boolean, modifie
 
 /** One video in a creator's gallery: the thumbnail, then title, description and details underneath. */
 @Composable
-fun GalleryCard(video: Video, isCurrent: Boolean, modifier: Modifier = Modifier) {
+fun GalleryCard(video: Video, isCurrent: Boolean, modifier: Modifier = Modifier, showCreator: Boolean = false) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         LongThumbnail(video, Modifier.fillMaxWidth(), isCurrent = isCurrent, corner = 12.dp)
         Text(video.displayTitle, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        // Latest mixes creators, so each card names its own.
+        if (showCreator) {
+            LocalContext.current.curated.state.library(video.creator, VideoForm.LONG)?.let {
+                Text(it.creator.displayName, style = MaterialTheme.typography.labelMedium, color = YouTubeRed, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            }
+        }
         if (video.details.isNotEmpty()) {
             Text(
                 video.details, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),

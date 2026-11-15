@@ -32,7 +32,7 @@ struct HomeView: View {
                         let unwatched = app.latestCount(in: nil)
                         WatchTile(symbol: "clock", tint: .logoRed, title: "Latest",
                                   subtitle: unwatched > 0 ? "\(unwatched) unwatched" : "All caught up") {
-                            startMix(.latest(nil))
+                            router.open(.latest(nil))
                         }
                         WatchTile(symbol: "shuffle", tint: .topTint, title: "Automix", subtitle: "Mixed creators",
                                   hold: { router.pick(.longAutomix) }) {
@@ -48,7 +48,7 @@ struct HomeView: View {
                     HStack(spacing: 10) {
                         Spacer()
                         if laterCount > 0 {
-                            SavedButton(symbol: "tray.and.arrow.down", title: "Watch Later",
+                            SavedButton(symbol: "arrowshape.bounce.forward", title: "Watch Later",
                                         mode: app.form == .short ? .watchLater : .longWatchLater, onPick: playSaved)
                                 .accessibilityIdentifier("watchLaterRow")
                         }
@@ -158,7 +158,7 @@ struct HomeView: View {
                          on: isPlaying { if case .top(nil, _) = $0 { true } else { false } },
                          hold: { router.pick(.top) }) { startMix(.top(nil)) }
         } else {
-            BarMixButton(symbol: "clock", tint: .logoRed, title: "Latest", on: isPlaying { $0 == .latest(nil) }) { startMix(.latest(nil)) }
+            BarMixButton(symbol: "clock", tint: .logoRed, title: "Latest", on: router.sideLatest == SideLatest(category: nil)) { router.open(.latest(nil)) }
             BarMixButton(symbol: "shuffle", tint: .topTint, title: "Automix", on: isPlaying { if case .longAutomix(nil, _) = $0 { true } else { false } },
                          hold: { router.pick(.longAutomix) }) { startMix(.longAutomix(nil)) }
         }
@@ -180,11 +180,13 @@ struct HomeView: View {
         router.open(.player(mode))
     }
 
-    /// A creator's videos open as a list (a long-video creator's or playlist's as a gallery); mixes open in the player.
+    /// A creator's videos open as a list (a long-video creator's or playlist's, and Latest, as a gallery); mixes open
+    /// in the player.
     private func open(_ mode: PlaybackMode) {
         switch mode {
         case .creator(let username): router.open(.creator(username))
         case .longCreator(let username): router.open(.gallery(username))
+        case .latest(let category): router.open(.latest(category))
         default: router.open(.player(mode))
         }
     }

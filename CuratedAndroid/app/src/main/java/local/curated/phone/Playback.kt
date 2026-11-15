@@ -38,6 +38,12 @@ class Playback(private val context: Context, private val app: AppState) {
     var isPlaying by mutableStateOf(false); private set
     /** True unless paused, so it stays set while buffering and between videos. */
     var playWhenReady by mutableStateOf(false); private set
+    /**
+     * A video is playing or loading to play, so the screen should stay on. Unlike [playWhenReady] it's off once a video
+     * has ended (the Up Next card waits with play still asked for), after an error, and while another app or a call
+     * holds the sound.
+     */
+    var keepsScreenOn by mutableStateOf(false); private set
     /** Set when the queue was cut to a time budget (Automix "Time Limit"). */
     var timeLimitMinutes by mutableStateOf<Int?>(null); private set
     /** Position in the current video, updated a few times a second. */
@@ -58,6 +64,13 @@ class Playback(private val context: Context, private val app: AppState) {
     var fullscreen by mutableStateOf(false)
     /** Whether the phone was upright when full screen started, so leaving it turns it back. */
     var fullscreenFromPortrait = false
+    /** Full screen came from turning the phone sideways with two panes off for long videos (Settings), not its button. */
+    var fullscreenFromTurn = false
+    /**
+     * Upright after leaving full screen, until the phone is held upright (MainActivity watches the sensor); otherwise
+     * it would turn straight back.
+     */
+    var portraitHeld by mutableStateOf(false)
     /** Clear mode: the player hides everything over the video until it's tapped (see PlayerScreen). Kept until turned off. */
     var clearMode by mutableStateOf(false)
     /** The player's queue sheet is up. Here so the sideways side panel's Queue button can open it too. */
@@ -96,6 +109,12 @@ class Playback(private val context: Context, private val app: AppState) {
 
             override fun onPlayWhenReadyChanged(ready: Boolean, reason: Int) {
                 playWhenReady = ready
+            }
+
+            override fun onEvents(player: Player, events: Player.Events) {
+                keepsScreenOn = player.isPlaying || (player.playWhenReady &&
+                    player.playbackState == Player.STATE_BUFFERING &&
+                    player.playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_NONE)
             }
 
             /** A missing or unreadable file shouldn't stall the queue. */
@@ -421,6 +440,12 @@ class Playback(private val context: Context, private val app: AppState) {
     /** 1x → 1.5x → 2x → 1x. */
     fun cycleSpeed() {
         speed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.size]
+        applySpeed()
+    }
+
+    /** A speed picked from a menu (the full screen player's). */
+    fun pickSpeed(value: Float) {
+        speed = value
         applySpeed()
     }
 

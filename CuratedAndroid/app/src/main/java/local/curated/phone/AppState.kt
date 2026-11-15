@@ -1,6 +1,7 @@
 package local.curated.phone
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.runtime.getValue
@@ -49,6 +50,33 @@ class AppState(private val context: Context) {
     var autoplayLong by mutableStateOf(store.prefs.getBoolean(KEY_AUTOPLAY_LONG, false)); private set
     /** Short videos: go on to the next one when a video ends (on by default), or play it again. */
     var autoplayShort by mutableStateOf(store.prefs.getBoolean(KEY_AUTOPLAY_SHORT, true)); private set
+    /** This phone folds (a Galaxy Z Fold, say): it has a hinge sensor. The turning settings are then per screen. */
+    val foldable: Boolean = context.packageManager.hasSystemFeature(PackageManager.FEATURE_SENSOR_HINGE_ANGLE)
+    /** Allowed by default on tablets and foldables; other phones stay upright. */
+    private val landscapeByDefault: Boolean = foldable || context.resources.configuration.smallestScreenWidthDp >= 600
+    /**
+     * Turning sideways, chosen in Settings: whether short videos turn (to their sideways layout), and whether long
+     * videos get their two panes (if not, a long video turned sideways plays full screen). On a foldable each is chosen
+     * for folded and unfolded. Keys from `landscapeKey`; a missing one means the device's default.
+     */
+    private var landscapeChoices by mutableStateOf(
+        LANDSCAPE_KEYS.mapNotNull { key ->
+            key.takeIf { store.prefs.contains(KEY_LANDSCAPE_PREFIX + it) }?.let { it to store.prefs.getBoolean(KEY_LANDSCAPE_PREFIX + it, false) }
+        }.toMap(),
+    )
+
+    private fun landscapeKey(form: VideoForm, unfolded: Boolean): String =
+        (if (form == VideoForm.LONG) "long" else "short") + if (foldable && unfolded) "Unfolded" else ""
+
+    /** Short videos: whether the app may turn sideways. Long videos: whether turned sideways is two panes. */
+    fun allowsLandscape(form: VideoForm, unfolded: Boolean): Boolean =
+        landscapeChoices[landscapeKey(form, unfolded)] ?: landscapeByDefault
+
+    fun setAllowsLandscape(allowed: Boolean, form: VideoForm, unfolded: Boolean) {
+        val key = landscapeKey(form, unfolded)
+        landscapeChoices = landscapeChoices + (key to allowed)
+        store.prefs.edit { putBoolean(KEY_LANDSCAPE_PREFIX + key, allowed) }
+    }
     /** Where each long video was left off, including ones cleared (for syncing with the Mac). */
     private var positionMarks by mutableStateOf(store.loadPositions())
     /** Called with the videos whose position just changed because of the Mac, so a paused player can move there. */
@@ -240,6 +268,21 @@ class AppState(private val context: Context) {
     val allVideos: List<Video> get() = (libraries + longLibraries + vineLibraries).flatMap { it.videos }.distinctBy { it.id }
 
     fun isPlayed(video: Video) = video.id in played
+
+    /**
+     * Long videos' Latest list, unwatched only. The main one: the Suggestions playlist first, in its order, then every
+     * other long video, creators' and playlists' alike, newest first. A category's: its creators' videos newest first,
+     * hand-picked ones first.
+     */
+    fun latestVideos(category: String?): List<Video> {
+        if (category != null) return handPickedFirst(Queues.latest(mixLibraries(category, VideoForm.LONG), played))
+        val suggestions = longLibraries.firstOrNull { it.id == SUGGESTIONS_KEY }?.videos.orEmpty().filter { !isPlayed(it) }
+        val seen = suggestions.mapTo(HashSet()) { it.id }
+        val rest = longLibraries.filter { it.id != SUGGESTIONS_KEY }.flatMap { it.videos }
+            .filter { !isPlayed(it) && seen.add(it.id) }
+            .sortedByDescending { it.date }
+        return suggestions + rest
+    }
     fun unplayedCount(library: CreatorLibrary) = library.videos.count { it.id !in played }
     /** For the mixes' counts, so playlists aren't included (and Vines are, where Automix plays them). */
     fun unplayedCount(category: String?, form: VideoForm = VideoForm.SHORT) =
@@ -999,8 +1042,13 @@ class AppState(private val context: Context) {
         const val KEY_SYNC_FORMS = "syncForms"
         const val KEY_AUTOPLAY_LONG = "autoplayLong"
         const val KEY_AUTOPLAY_SHORT = "autoplayShort"
+        const val KEY_LANDSCAPE_PREFIX = "landscape."
+        val LANDSCAPE_KEYS = listOf("short", "shortUnfolded", "long", "longUnfolded")
     }
 }
 
 /** Light, dark, or whatever the phone is set to. The player stays dark either way. */
 enum class Appearance(val label: String) { System("System"), Light("Light"), Dark("Dark") }
+
+/** The Mac's Suggestions playlist (videos picked from the YouTube home feed). */
+const val SUGGESTIONS_KEY = "youtube-playlist@suggestions"

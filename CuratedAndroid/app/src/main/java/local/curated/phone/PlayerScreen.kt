@@ -1,5 +1,6 @@
 package local.curated.phone
 
+import androidx.compose.ui.res.vectorResource
 import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.BackHandler
@@ -42,7 +43,6 @@ import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.outlined.MoveToInbox
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -84,7 +84,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material.icons.filled.MoveToInbox
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.AssistChip
@@ -96,6 +95,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -470,7 +472,8 @@ private fun VideoArea(mode: PlaybackMode, isLoaded: Boolean, modifier: Modifier,
                             skipFlash = if (ahead) 1 else -1
                             skipFlashCount++
                         } else null,
-                        onLongPress = { playback.holdFast(true) },
+                        // Long videos: only the right half, as their double taps split the screen.
+                        onLongPress = { at -> if (!isLong || at.x > size.width / 2) playback.holdFast(true) },
                         onPress = {
                             tryAwaitRelease()
                             playback.holdFast(false)
@@ -842,7 +845,7 @@ private fun VideoButtonColumn(video: Video, modifier: Modifier = Modifier) {
         ) {
             val saved = state.isSavedForLater(video)
             PillButton(
-                if (saved) Icons.Filled.MoveToInbox else Icons.Outlined.MoveToInbox,
+                if (saved) ImageVector.vectorResource(R.drawable.ic_watch_later) else ImageVector.vectorResource(R.drawable.ic_watch_later_outline),
                 if (saved) "In Watch Later. Tap to take it off the list" else "Watch Later",
                 enabled = !playback.finished || saved,
             ) { if (saved) state.setWatchLater(listOf(video), false) else playback.saveForLater() }
@@ -1101,7 +1104,7 @@ private fun VideoButtons(video: Video, vertical: Boolean, modifier: Modifier = M
             Text(speedLabel(playback.shownSpeed), color = Color.White.copy(alpha = if (playback.speedLocked) 0.55f else 1f), fontWeight = FontWeight.SemiBold)
         }
         IconButton(onClick = { playback.saveForLater() }, enabled = !playback.finished) {
-            Icon(Icons.Filled.MoveToInbox, "Watch Later", tint = Color.White)
+            Icon(ImageVector.vectorResource(R.drawable.ic_watch_later), "Watch Later", tint = Color.White)
         }
         val bookmarked = state.isBookmarked(video)
         IconButton(onClick = { playback.toggleBookmark() }) {
@@ -1152,6 +1155,8 @@ fun enterFullscreen(context: Context) {
     val activity = context.findActivity()
     app.playback.fullscreenFromPortrait =
         context.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+    app.playback.fullscreenFromTurn = false
+    app.playback.portraitHeld = false
     app.playback.fullscreen = true
     activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
 }
@@ -1159,13 +1164,14 @@ fun enterFullscreen(context: Context) {
 fun exitFullscreen(context: Context) {
     val playback = context.curated.playback
     if (!playback.fullscreen) return
+    // Back upright if that's how it started, or if turning sideways is what made it full screen, held there until the
+    // phone is upright (MainActivity).
+    if (playback.fullscreenFromPortrait || playback.fullscreenFromTurn) playback.portraitHeld = true
     playback.fullscreen = false
-    // Back upright if that's how it started; the sensor takes over again a moment later (FullscreenEffects).
-    context.findActivity()?.requestedOrientation =
-        if (playback.fullscreenFromPortrait) ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    playback.fullscreenFromTurn = false
 }
 
-/** Hides the status and navigation bars while full screen, and gives the sensor the orientation back afterwards. */
+/** Hides the status and navigation bars while full screen. */
 @Composable
 fun FullscreenEffects(fullscreen: Boolean) {
     val context = LocalContext.current
@@ -1180,12 +1186,6 @@ fun FullscreenEffects(fullscreen: Boolean) {
             bars?.show(WindowInsetsCompat.Type.systemBars())
         }
         onDispose { bars?.show(WindowInsetsCompat.Type.systemBars()) }
-    }
-    LaunchedEffect(fullscreen) {
-        if (!fullscreen && activity?.requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT) {
-            kotlinx.coroutines.delay(2500)
-            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        }
     }
 }
 
@@ -1207,7 +1207,8 @@ private fun ClearModeEffects(on: Boolean) {
 /**
  * A long video full screen: just the video while it plays. A tap brings everything up for 3 seconds (exit, the title
  * and creator, back and ahead 10 seconds, play or pause, the description and the seek bar); it all stays up while
- * paused. Double-tap the sides to skip.
+ * paused, with the speed menu, picture in picture, bookmark and watched at the top right. Double-tap the sides to skip,
+ * and hold the right half for 2x.
  */
 @Composable
 fun FullscreenPlayer() {
@@ -1249,6 +1250,7 @@ fun FullscreenPlayer() {
                         Text(library?.creator?.displayName ?: "", color = Color.White.copy(alpha = 0.7f),
                              style = MaterialTheme.typography.labelMedium, maxLines = 1)
                     }
+                    FullscreenButtons(video, ::poke)
                 }
                 Row(
                     Modifier.align(Alignment.Center),
@@ -1281,6 +1283,58 @@ fun FullscreenPlayer() {
             }
         }
         if (playback.awaitingNext) playback.upNext?.let { UpNextCard(it, Modifier.align(Alignment.Center)) }
+    }
+}
+
+/** Full screen's buttons at the top right: the speed (a menu of speeds), picture in picture, bookmark and watched. */
+@Composable
+private fun FullscreenButtons(video: Video, poke: () -> Unit) {
+    val context = LocalContext.current
+    val state = context.curated.state
+    val playback = context.curated.playback
+    var speedMenu by remember { mutableStateOf(false) }
+    // The controls stay up while the menu is open.
+    LaunchedEffect(speedMenu) {
+        while (speedMenu) {
+            poke()
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+    Box {
+        TextButton(onClick = { speedMenu = true; poke() }, enabled = !playback.speedLocked) {
+            Text(
+                speedLabel(playback.shownSpeed), fontWeight = FontWeight.SemiBold,
+                color = Color.White.copy(alpha = if (playback.speedLocked) 0.55f else 1f),
+            )
+        }
+        DropdownMenu(expanded = speedMenu, onDismissRequest = { speedMenu = false }) {
+            Playback.SPEEDS.forEach { speed ->
+                DropdownMenuItem(
+                    text = { Text(speedLabel(speed), fontWeight = if (speed == playback.shownSpeed) FontWeight.Bold else null) },
+                    onClick = {
+                        playback.pickSpeed(speed)
+                        speedMenu = false
+                    },
+                )
+            }
+        }
+    }
+    IconButton(onClick = { (context.findActivity() as? MainActivity)?.enterPip() }) {
+        Icon(Icons.Filled.PictureInPictureAlt, "Picture in picture", tint = Color.White)
+    }
+    val bookmarked = state.isBookmarked(video)
+    IconButton(onClick = { playback.toggleBookmark(); poke() }) {
+        Icon(
+            if (bookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
+            if (bookmarked) "Bookmarked. Tap to remove the bookmark" else "Bookmark", tint = Color.White,
+        )
+    }
+    val isPlayed = state.isPlayed(video)
+    IconButton(onClick = { state.setPlayed(video, !isPlayed); poke() }) {
+        Icon(
+            if (isPlayed) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+            if (isPlayed) "Watched. Tap to mark unwatched" else "Mark as watched", tint = Color.White,
+        )
     }
 }
 

@@ -18,7 +18,7 @@ enum Queues {
         case .bookmarks: app.bookmarkedVideos()
         case .creator(let username): app.library(username)?.videos ?? []
         case .longCreator(let username): app.library(username, form: .long).map(app.longVideos) ?? []
-        case .latest(let category): app.handPickedFirst(latest(app.mixLibraries(in: category, form: .long), played: app.played))
+        case .latest(let category): app.latestVideos(in: category)
         case .longAutomix(let category, let picked):
             app.handPickedFirst(automix(picked.map { app.mixLibraries(picked: $0, form: .long) } ?? app.longAutomixLibraries(in: category),
                                         played: app.played.union(app.bookmarkedIDs)))

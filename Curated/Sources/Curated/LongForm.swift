@@ -130,7 +130,7 @@ struct LongVideoMeta: View {
                 Label("Watched", systemImage: "checkmark.circle.fill")
                 Text("·")
             } else if model.isSavedForLater(video) {
-                Label("Later", systemImage: "tray.and.arrow.down.fill")
+                Label("Later", systemImage: "arrowshape.bounce.forward.fill")
                 Text("·")
             }
             if model.isBookmarked(video) {
@@ -393,6 +393,8 @@ struct GalleryCard: View {
     let video: Video
     let isCurrent: Bool
     var size: Int64? = nil
+    /// Latest mixes creators, so its cards name theirs.
+    var creatorName: String? = nil
     let onPlay: () -> Void
     var onDelete: (() -> Void)? = nil
     @State private var hovering = false
@@ -419,6 +421,9 @@ struct GalleryCard: View {
                 .scaleEffect(hovering ? 1.02 : 1)
                 .shadow(color: .black.opacity(hovering ? 0.25 : 0), radius: 8, y: 3)
             Text(video.displayTitle).font(.headline).lineLimit(2)
+            if let creatorName {
+                Text(creatorName).font(.subheadline.weight(.semibold)).foregroundStyle(.red).lineLimit(1)
+            }
             if !video.details.isEmpty {
                 Text(video.details).font(.callout).foregroundStyle(.secondary).lineLimit(3)
             }
@@ -529,5 +534,101 @@ struct PlaylistThumbnail: View {
         .frame(width: size, height: size)
         .clipShape(shape)
         .overlay { shape.strokeBorder(.white.opacity(0.15)) }
+    }
+}
+
+/// Long videos' Latest as a grid, like a creator's gallery: the unwatched Suggestions first, then every other long
+/// video newest first (AppModel.latestVideos). Picking one plays the list from there; All Videos comes back.
+struct LatestGalleryView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(Playback.self) private var playback
+    let category: UUID?
+    @State private var showGallery = true
+
+    private var mode: PlaybackMode { .latest(category) }
+    private var isLoaded: Bool { playback.isLoaded(mode, form: .long) && playback.current != nil }
+    private var ended: Bool { playback.awaitingNext || playback.finished }
+    private var title: String { (model.category(category).map { "\($0.name) " } ?? "") + "Latest" }
+
+    var body: some View {
+        Group {
+            if showGallery || !isLoaded {
+                gallery
+            } else {
+                LongPlayerPane()
+                    .overlay(alignment: .topLeading) { backButton }
+            }
+        }
+        .navigationTitle(title)
+        .onAppear {
+            // Coming back to a video that's still going (e.g. from Now Playing) shows the player.
+            showGallery = !(isLoaded && !ended)
+        }
+        .onChange(of: ended) { _, ended in
+            if ended && isLoaded { withAnimation(.snappy(duration: 0.3)) { showGallery = true } }
+        }
+    }
+
+    private var backButton: some View {
+        Button {
+            playback.player.pause()
+            withAnimation(.snappy(duration: 0.3)) { showGallery = true }
+        } label: {
+            Label("All Videos", systemImage: "chevron.left")
+                .font(.callout.weight(.medium))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .glassCapsule()
+        .environment(\.colorScheme, .dark)
+        .padding(12)
+        .help("Back to \(title) (pauses this one; it picks up where you left off)")
+    }
+
+    private var gallery: some View {
+        let videos = model.latestVideos(in: category)
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                HStack(spacing: 14) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 26, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 56, height: 56)
+                        .background(Color.logoRed.gradient, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title).font(.title2.weight(.bold))
+                        Text("\(videos.count) unwatched · " + formatLength(model.totalDuration(videos)))
+                            .font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                }
+                if videos.isEmpty {
+                    ContentUnavailableView(model.longLibraries.isEmpty ? "No long videos yet" : "All caught up",
+                                           systemImage: "clock",
+                                           description: Text(model.longLibraries.isEmpty
+                        ? "In Creators & Downloads, light up the wide video icon on a YouTube creator to download their long videos."
+                        : "No unwatched long videos — check back after the next download."))
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 40)
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 260, maximum: 420), spacing: 20, alignment: .top)],
+                              alignment: .leading, spacing: 28) {
+                        ForEach(Array(videos.enumerated()), id: \.element.id) { index, video in
+                            GalleryCard(video: video, isCurrent: isLoaded && playback.current?.id == video.id,
+                                        creatorName: model.library(for: video.creator, form: .long)?.displayName,
+                                        onPlay: { play(videos, index) })
+                                .contextMenu { VideoContextMenu(video: video) }
+                        }
+                    }
+                }
+            }
+            .padding(24)
+        }
+    }
+
+    private func play(_ videos: [Video], _ index: Int) {
+        playback.start(videos, at: index, mode: mode, form: .long)
+        withAnimation(.snappy(duration: 0.3)) { showGallery = false }
     }
 }

@@ -92,7 +92,7 @@ class CarLibrary(private val context: Context, private val app: AppState, privat
             add(folder(QUEUE, "Up Next", count(upNext), CarArtwork.tile(context, Tile.Queue), "Now Playing", playable = STYLE_LIST))
         }
         val long = "Long Videos"
-        addMix("Latest", Tile.Latest, app.mixLibraries(null, VideoForm.LONG).sumOf { app.unplayedCount(it) }, PlaybackMode.Latest(null), long)
+        addMix("Latest", Tile.Latest, app.latestVideos(null).size, PlaybackMode.Latest(null), long)
         addMix("Automix", Tile.LongAutomix, app.automixCount(null, VideoForm.LONG), PlaybackMode.Automix(null, VideoForm.LONG), long)
         addMix("Watch Later", Tile.WatchLater, app.watchLaterVideos(VideoForm.LONG).size, PlaybackMode.WatchLater(VideoForm.LONG), long)
         addMix("Bookmarks", Tile.Bookmarks, app.bookmarkedVideos(VideoForm.LONG).size, PlaybackMode.Bookmarks(VideoForm.LONG), long)
@@ -122,7 +122,7 @@ class CarLibrary(private val context: Context, private val app: AppState, privat
 
     private fun category(id: String): List<MediaItem> = buildList {
         val long = "Long Videos"
-        addMix("Latest", Tile.Latest, app.mixLibraries(id, VideoForm.LONG).sumOf { app.unplayedCount(it) }, PlaybackMode.Latest(id), long)
+        addMix("Latest", Tile.Latest, app.latestVideos(id).size, PlaybackMode.Latest(id), long)
         addMix("Automix", Tile.LongAutomix, app.automixCount(id, VideoForm.LONG), PlaybackMode.Automix(id, VideoForm.LONG), long)
         val short = "Short Videos"
         addMix("Automix", Tile.Automix, app.automixCount(id, VideoForm.SHORT), PlaybackMode.Automix(id), short)

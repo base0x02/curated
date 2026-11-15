@@ -210,7 +210,7 @@ struct ContentView: View {
                 mixTile(.top(nil), symbol: "star.fill", tint: .topTint,
                         title: "Top \(PlaybackMode.topCount(nil, form: .short))", subtitle: "Most viewed", pick: .top)
             case .long:
-                let unwatched = model.unplayedCount(in: nil, form: .long)
+                let unwatched = model.latestVideos(in: nil).count
                 mixTile(.latest(nil), symbol: "clock", tint: .logoRed, title: "Latest",
                         subtitle: unwatched > 0 ? "\(unwatched) unwatched" : "All caught up", pick: nil)
                 mixTile(.automix(nil), symbol: "shuffle", tint: .topTint, title: "Automix", subtitle: "Mixed creators",
@@ -252,7 +252,7 @@ struct ContentView: View {
             HStack(spacing: 8) {
                 Spacer()
                 if showLater {
-                    SavedButton(symbol: "tray.and.arrow.down", title: "Watch Later", videos: model.watchLaterVideos(form),
+                    SavedButton(symbol: "arrowshape.bounce.forward", title: "Watch Later", videos: model.watchLaterVideos(form),
                                 selected: selection == .watchLater) { playSaved(.watchLater, $0, at: $1) }
                 }
                 if showBookmarks {
@@ -285,6 +285,7 @@ struct ContentView: View {
     /// The queue behind a mix in the sidebar.
     private func queue(for item: SidebarItem) -> [Video] {
         let videos = mixVideos(item)
+        if case .latest = item { return videos }  // Already in its own order (AppModel.latestVideos).
         return form == .long ? model.handPickedFirst(videos) : videos
     }
 
@@ -297,7 +298,7 @@ struct ContentView: View {
         case .vineAutomix:
             Library.automixQueue(model.vineLibraries, excluding: model.played.union(model.bookmarkedIDs))
         case .latest(let categoryID):
-            Library.latestQueue(model.mixLibraries(.long, in: categoryID), excluding: model.played)
+            model.latestVideos(in: categoryID)
         case .top(let categoryID, let picked):
             Library.topQueue(picked.map { model.mixLibraries(form, picked: $0) } ?? model.mixLibraries(form, in: categoryID),
                              excluding: model.played, count: PlaybackMode.topCount(categoryID, form: form))
@@ -314,8 +315,11 @@ struct ContentView: View {
         switch item {
         case .automix(let c, let p): mode = .automix(c, picked: p)
         case .top(let c, let p): mode = .top(c, picked: p)
-        case .latest(let c): mode = .latest(c)
-        default: selection = item; return
+        // Latest opens as a gallery, like a creator's; a video picked there plays the list from it.
+        default:
+            holdingLaunchMix = false
+            selection = item
+            return
         }
         holdingLaunchMix = false
         playback.start(queue(for: item), mode: mode, form: form)
@@ -454,13 +458,7 @@ struct ContentView: View {
                 queue(for: .vineAutomix)
             }
         case .latest(let categoryID):
-            let name = model.category(categoryID).map { "\($0.name) " } ?? ""
-            QueueView(mode: .latest(categoryID), form: .long, title: "\(name)Latest",
-                      emptyText: model.longLibraries.isEmpty
-                        ? "No long videos yet. In Creators & Downloads, light up the wide video icon on a YouTube creator to download their long videos."
-                        : "No unwatched long videos — check back after the next download.") {
-                queue(for: .latest(categoryID))
-            }
+            LatestGalleryView(category: categoryID)
         case .top(let categoryID, let picked):
             let name = model.category(categoryID).map { "\($0.name) " } ?? ""
             QueueView(mode: .top(categoryID, picked: picked), form: form,
@@ -1296,7 +1294,7 @@ struct VideoRow: View {
                             .labelStyle(.titleAndIcon)
                         Text("·")
                     } else if isSaved {
-                        Label("Later", systemImage: "tray.and.arrow.down.fill")
+                        Label("Later", systemImage: "arrowshape.bounce.forward.fill")
                             .labelStyle(.titleAndIcon)
                         Text("·")
                     }
@@ -1780,7 +1778,7 @@ struct VideoInfoOverlay: View {
         case .automix?: return ("Automix", "shuffle")
         case .vineAutomix?: return ("Vine Automix", "shuffle")
         case .latest?: return ("Latest · \(position)", "clock")
-        case .watchLater?: return (position, "tray.and.arrow.down")
+        case .watchLater?: return (position, "arrowshape.bounce.forward")
         case .bookmarks?: return (position, "bookmark")
         case .ipod?: return (position, "ipod")
         case .top?: return (position, "star")
@@ -1879,7 +1877,7 @@ struct VideoSideButtons: View {
             .help(playback.speedLocked ? "This category always plays at 1×. Your speed comes back on the next video" : "Playback speed: 1×, 1.5× or 2×")
             VStack(spacing: 4) {
                 let saved = model.isSavedForLater(video)
-                Button { playback.toggleWatchLater() } label: { icon(saved ? "tray.and.arrow.down.fill" : "tray.and.arrow.down") }
+                Button { playback.toggleWatchLater() } label: { icon(saved ? "arrowshape.bounce.forward.fill" : "arrowshape.bounce.forward") }
                     .disabled(playback.finished && !saved)
                     .help(saved ? "In Watch Later. Click to take it off the list (⌘L)"
                                 : "Watch Later: save this video and move on without marking it watched (⌘L)")

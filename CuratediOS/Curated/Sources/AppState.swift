@@ -34,6 +34,33 @@ final class AppState {
     var autoplayShort = UserDefaults.standard.object(forKey: "autoplayShort") as? Bool ?? true {
         didSet { UserDefaults.standard.set(autoplayShort, forKey: "autoplayShort") }
     }
+    /// This device folds (iPhone Duo): it reported a hinge. Saved once seen, since the hinge only reports after launch.
+    var foldable = UserDefaults.standard.bool(forKey: "foldable") {
+        didSet { if foldable != oldValue { UserDefaults.standard.set(foldable, forKey: "foldable") } }
+    }
+    /// Turning sideways, chosen in Settings: whether short videos turn (to their sideways layout), and whether long videos
+    /// get their side-by-side layout (if not, a long video turned sideways plays full screen). On a foldable each is
+    /// chosen for folded and unfolded. Keys from `landscapeKey`; a missing one means the device's default.
+    private(set) var landscapeChoices = UserDefaults.standard.dictionary(forKey: "landscape") as? [String: Bool] ?? [:] {
+        didSet { UserDefaults.standard.set(landscapeChoices, forKey: "landscape") }
+    }
+
+    /// Allowed by default on iPad and iPhone Duo; other iPhones stay upright.
+    var landscapeByDefault: Bool { UIDevice.current.userInterfaceIdiom == .pad || foldable }
+
+    private func landscapeKey(_ form: VideoForm, unfolded: Bool) -> String {
+        form.rawValue + (foldable && unfolded ? "Unfolded" : "")
+    }
+
+    /// Short videos: whether the app may turn sideways. Long videos: whether turned sideways is side by side.
+    /// `unfolded` (iPhone Duo's inner display) only counts on a foldable.
+    func allowsLandscape(_ form: VideoForm, unfolded: Bool) -> Bool {
+        landscapeChoices[landscapeKey(form, unfolded: unfolded)] ?? landscapeByDefault
+    }
+
+    func setAllowsLandscape(_ allowed: Bool, _ form: VideoForm, unfolded: Bool) {
+        landscapeChoices[landscapeKey(form, unfolded: unfolded)] = allowed
+    }
     /// A lighter aurora, and no blurred fill behind short videos, to use less battery. Off by default.
     var lowPower = UserDefaults.standard.bool(forKey: "lowPower") {
         didSet { UserDefaults.standard.set(lowPower, forKey: "lowPower") }
@@ -464,7 +491,25 @@ final class AppState {
 
     /// What Latest will play: unwatched long videos, not counting playlists.
     func latestCount(in category: String?) -> Int {
-        mixLibraries(in: category, form: .long).reduce(0) { $0 + unplayedCount($1) }
+        latestVideos(in: category).count
+    }
+
+    /// The Mac's Suggestions playlist (videos picked from the YouTube home feed).
+    static let suggestionsKey = "youtube-playlist@suggestions"
+
+    /// Long videos' Latest list, unwatched only. The main one: the Suggestions playlist first, in its order, then every
+    /// other long video, creators' and playlists' alike, newest first. A category's: its creators' videos newest first,
+    /// hand-picked ones first.
+    func latestVideos(in category: String?) -> [Video] {
+        guard category == nil else {
+            return handPickedFirst(Queues.latest(mixLibraries(in: category, form: .long), played: played))
+        }
+        let suggestions = longLibraries.first { $0.id == Self.suggestionsKey }?.videos.filter { !isPlayed($0) } ?? []
+        var seen = Set(suggestions.map(\.id))
+        let rest = longLibraries.filter { $0.id != Self.suggestionsKey }.flatMap(\.videos)
+            .filter { !isPlayed($0) && seen.insert($0.id).inserted }
+            .sorted { $0.date > $1.date }
+        return suggestions + rest
     }
 
     /// Keeps the newer state of each video.
