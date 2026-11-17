@@ -827,7 +827,7 @@ enum DownloadEngine {
     }
 
     /// Just the avatar and name, for a creator with nothing to download.
-    private static func refreshProfile(_ creator: Creator, folder: URL, log: (String) -> Void) async {
+    static func refreshProfile(_ creator: Creator, folder: URL, log: (String) -> Void) async {
         switch creator.platform {
         case .tiktok: await refreshTikTokProfile(creator, folder: folder, log: log)
         case .youtube where !creator.playlist: _ = await refreshYouTubeChannel(creator, folder: folder, log: log)
@@ -871,7 +871,7 @@ enum DownloadEngine {
         return listing
     }
 
-    private static func cleanError(_ line: String) -> String {
+    static func cleanError(_ line: String) -> String {
         line.replacingOccurrences(of: #"^ERROR:\s*(\[[^\]]+\]\s*)?"#, with: "", options: .regularExpression)
     }
 

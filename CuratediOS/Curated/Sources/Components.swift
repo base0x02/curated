@@ -9,6 +9,8 @@ extension Color {
     static let youTubeRed = Color(red: 0xFF / 255, green: 0x45 / 255, blue: 0x3A / 255)
     /// The green of the classic Vine logo.
     static let vineGreen = Color(red: 0x00 / 255, green: 0xB4 / 255, blue: 0x88 / 255)
+    /// Suggested creators' dashed avatar ring, as on the Mac.
+    static let suggestedPink = Color(red: 0xFF / 255, green: 0x8E / 255, blue: 0xEA / 255)
 }
 
 /// Avatar outline: YouTube red, Vine green, or TikTok's cyan-to-magenta.
@@ -48,7 +50,16 @@ struct AvatarView: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
-        .overlay { Circle().strokeBorder(platformRing(username), lineWidth: max(1.5, size / 24)) }
+        .overlay {
+            if isSuggestedKey(username) {
+                // Suggested creators: a dashed pink ring, not the platform's.
+                Circle().strokeBorder(Color.suggestedPink,
+                                      style: StrokeStyle(lineWidth: max(2, size / 18), lineCap: .round,
+                                                         dash: [max(3, size / 9), max(2.5, size / 14)]))
+            } else {
+                Circle().strokeBorder(platformRing(username), lineWidth: max(1.5, size / 24))
+            }
+        }
         .grayscale(dimmed ? 1 : 0)
         .opacity(dimmed ? 0.45 : 1)
         .accessibilityHidden(true)

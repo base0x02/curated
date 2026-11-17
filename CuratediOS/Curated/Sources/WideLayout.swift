@@ -1026,6 +1026,7 @@ struct PlayerPane: View {
                     .foregroundStyle(.white.opacity(0.7))
                 }
                 .lineLimit(1)
+                SuggestedFollowButton(creatorKey: video.creator)
                 Spacer(minLength: 8)
                 if let views = video.viewCount {
                     VStack(spacing: 2) {

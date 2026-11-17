@@ -23,6 +23,20 @@ class Store(context: Context) {
     private val positionMarksFile = File(root, "positionmarks.json")
     private val nowPlayingFile = File(root, "nowplaying.json")
     private val playbackRulesFile = File(root, "playbackrules.json")
+    /** Suggested creators to add on the Mac at the next sync (`PendingFollow`). */
+    private val pendingFollowsFile = File(root, "pendingfollows.json")
+
+    @Synchronized
+    fun loadPendingFollows(): List<PendingFollow> = runCatching {
+        val array = org.json.JSONArray(pendingFollowsFile.readText())
+        (0 until array.length()).map { PendingFollow.fromJson(array.getJSONObject(it)) }
+    }.getOrDefault(emptyList())
+
+    @Synchronized
+    fun savePendingFollows(follows: List<PendingFollow>) {
+        if (follows.isEmpty()) pendingFollowsFile.delete()
+        else writeAtomically(pendingFollowsFile, org.json.JSONArray(follows.map { it.toJson() }).toString())
+    }
     val prefs = context.getSharedPreferences("curated", Context.MODE_PRIVATE)
 
     init {

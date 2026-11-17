@@ -794,9 +794,10 @@ private fun NowPlayingDetails(video: Video, mode: PlaybackMode, expanded: Boolea
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Avatar(library, video.creator, 36.dp)
         Column(Modifier.weight(1f)) {
-            Text(library?.creator?.displayName ?: "@${video.creator.removePrefix(YOUTUBE_KEY_PREFIX)}", color = Color.White, fontWeight = FontWeight.SemiBold)
+            Text(library?.creator?.displayName ?: "@${creatorHandle(video.creator)}", color = Color.White, fontWeight = FontWeight.SemiBold)
             Text(positionLabel(video, mode), style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.7f))
         }
+        SuggestedFollowButton(video.creator)
         video.viewCount?.let { views ->
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(Icons.Outlined.Visibility, "Views", tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(20.dp))
@@ -1045,6 +1046,7 @@ fun PlayerSideControls(modifier: Modifier = Modifier) {
                 Text(creatorName, color = ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
                 Text(positionLabel(video, mode), style = MaterialTheme.typography.labelSmall, color = faint, maxLines = 1)
             }
+            SuggestedFollowButton(video.creator)
             video.viewCount?.let { views ->
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Outlined.Visibility, "Views", tint = faint, modifier = Modifier.size(20.dp))

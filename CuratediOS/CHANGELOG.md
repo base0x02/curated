@@ -275,3 +275,8 @@ The iPhone companion, caught up with the Android app (version in step with the M
 - Leaving a long video's full screen while held sideways keeps the app upright until the phone is turned upright
 - A long video full screen has the speed (a menu of speeds), picture in picture, bookmark and watched buttons at the top right. Double-tap the right side to skip ahead 10 seconds and the left to go back (each extra tap adds 10), hold the right side for 2×, and pinch to zoom: it holds with a tick where the video fills the screen, and one finger moves the picture while zoomed
 - The screen is only kept awake while a video is actually playing, not while it's stalled with nothing to play or waiting on the Up Next card
+
+## 2.3 · 2026-11-17
+
+- Suggested short videos from your Mac (Curated 2.3 for Mac, Settings → Downloads): a Suggested card on Home, shown while your Mac has suggestions, with its own Automix. Suggested creators have a dashed pink ring around their avatar, and the main Automix plays them as one more creator
+- While a suggested video plays, a pink Add button beside the creator's name adds them to your Mac's creators in the category you pick (also Add to Creators… when you hold their avatar). If your Mac can't be reached, the button says "Next sync" and the creator is added then

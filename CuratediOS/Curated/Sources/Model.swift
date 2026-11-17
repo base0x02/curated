@@ -38,6 +38,12 @@ struct Creator: Codable, Identifiable, Hashable {
     var order: [String]?
     /// A Vine author ("vine@<Vine user ID>"): short videos only, no category. Nil from Macs before Vines.
     var vine: Bool?
+    /// A creator from the Mac's suggested feeds ("suggested-tiktok@…", "suggested-youtube@…"), not followed yet.
+    /// Short videos only, no category. Nil from Macs before API 11.
+    var suggested: Bool?
+    /// Suggested creators only: "tiktok" or "youtube".
+    var platform: String?
+    var isSuggested: Bool { suggested == true || isSuggestedKey(username) }
     /// A channel with long videos on, whose older videos can be asked for. Nil from Macs before API 10.
     var isPlaylist: Bool { playlist == true }
     var isVine: Bool { vine == true || username.hasPrefix(vineKeyPrefix) }
@@ -55,7 +61,7 @@ struct Creator: Codable, Identifiable, Hashable {
             let id = username.replacingOccurrences(of: "youtube-playlist@", with: "")
             return id == "suggestions" ? nil : URL(string: "https://www.youtube.com/playlist?list=\(id)")
         }
-        if !isYouTube { return URL(string: "https://www.tiktok.com/@\(username)") }
+        if !isYouTube { return URL(string: "https://www.tiktok.com/@\(handle)") }
         return URL(string: handle.hasPrefix("UC") ? "https://www.youtube.com/channel/\(handle)" : "https://www.youtube.com/@\(handle)")
     }
 }
@@ -68,12 +74,24 @@ let vineKeyPrefix = "vine@"
 /// Home's "Other Creators" and Vine cards, alongside the category ids, in a mix's `picked` cards.
 let otherCard = "other"
 let vineCard = "vine"
+/// The Suggested card (creators from the Mac's suggested feeds).
+let suggestedCard = "suggested"
+let suggestedTikTokPrefix = "suggested-tiktok@"
+let suggestedYouTubePrefix = "suggested-youtube@"
+func isSuggestedKey(_ creatorKey: String) -> Bool {
+    creatorKey.hasPrefix(suggestedTikTokPrefix) || creatorKey.hasPrefix(suggestedYouTubePrefix)
+}
 /// Long videos' Playlists card, which is never in a mix, in the playback rules.
 let playlistCard = "playlists"
 /// YouTube channels, and YouTube playlists ("youtube-playlist@<ID>").
-func isYouTubeKey(_ creatorKey: String) -> Bool { creatorKey.hasPrefix(youTubeKeyPrefix) || creatorKey.hasPrefix("youtube-playlist@") }
+func isYouTubeKey(_ creatorKey: String) -> Bool {
+    creatorKey.hasPrefix(youTubeKeyPrefix) || creatorKey.hasPrefix("youtube-playlist@") || creatorKey.hasPrefix(suggestedYouTubePrefix)
+}
 func creatorHandle(_ creatorKey: String) -> String {
-    creatorKey.hasPrefix(youTubeKeyPrefix) ? String(creatorKey.dropFirst(youTubeKeyPrefix.count)) : creatorKey
+    for prefix in [youTubeKeyPrefix, suggestedTikTokPrefix, suggestedYouTubePrefix] where creatorKey.hasPrefix(prefix) {
+        return String(creatorKey.dropFirst(prefix.count))
+    }
+    return creatorKey
 }
 
 struct Video: Codable, Identifiable, Hashable {
@@ -333,4 +351,11 @@ extension JSONEncoder {
         encoder.dateEncodingStrategy = .iso8601
         return encoder
     }()
+}
+
+/// Adding a suggested creator to the Mac's creators, waiting for the next sync when the Mac couldn't be reached.
+struct PendingFollow: Codable, Hashable {
+    let creator: String
+    let category: String?
+    let at: Date
 }

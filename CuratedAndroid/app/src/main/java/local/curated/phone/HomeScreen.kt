@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.StarBorder
@@ -226,6 +227,10 @@ fun HomeScreen(open: (Screen) -> Unit, mixButtonsInBar: Boolean = false) {
                 if (others.isNotEmpty()) add(HomeCard(OTHER_CARD, if (shown.isEmpty()) "All Creators" else "Other Creators", others))
                 // The author of every Vine on the phone, each like a creator.
                 if (form == VideoForm.SHORT && state.vineLibraries.isNotEmpty()) add(HomeCard(VINE_CARD, "Vine", state.vineLibraries, vine = true))
+                // Creators from the Mac's suggested feeds, while it has any.
+                if (form == VideoForm.SHORT && state.suggestedLibraries.isNotEmpty()) {
+                    add(HomeCard(SUGGESTED_CARD, "Suggested", state.suggestedLibraries, suggested = true))
+                }
             }.sortedBy { card -> card.libraries.none { state.unplayedCount(it) > 0 } }
             when (picking) {
                 MixPick.AUTOMIX -> MixPicker(
@@ -239,7 +244,7 @@ fun HomeScreen(open: (Screen) -> Unit, mixButtonsInBar: Boolean = false) {
                 }
                 // Top lists leave Vines out.
                 MixPick.TOP -> MixPicker(
-                    MixPick.TOP, cards.filter { !it.vine },
+                    MixPick.TOP, cards.filter { !it.vine && !it.suggested },
                     count = { card -> state.mixLibraries(setOf(card.key), VideoForm.SHORT).sumOf { state.unplayedCount(it) } },
                     onDismiss = { picking = null },
                 ) { picked ->
@@ -307,7 +312,8 @@ fun HomeScreen(open: (Screen) -> Unit, mixButtonsInBar: Boolean = false) {
                 }
                 items(cards, key = { "card-$form-${it.key}" }) { card ->
                     CreatorCard(
-                        card.title, card.libraries, cardKey = card.key, category = card.category, form = form, vine = card.vine, open = open,
+                        card.title, card.libraries, cardKey = card.key, category = card.category, form = form, vine = card.vine,
+                        suggested = card.suggested, open = open,
                         modifier = Modifier.animateItem(),
                     )
                 }
@@ -338,6 +344,7 @@ private fun mixStarter(open: (Screen) -> Unit): (PlaybackMode) -> Unit {
 /** One of Home's creator cards: a category's, "Other Creators" or Vine. `key` is a category id, `OTHER_CARD` or `VINE_CARD`. */
 private data class HomeCard(
     val key: String, val title: String, val libraries: List<CreatorLibrary>, val category: String? = null, val vine: Boolean = false,
+    val suggested: Boolean = false,
 )
 
 /**
@@ -443,6 +450,7 @@ private fun MixPicker(
                             row.forEach { card ->
                                 val glyph = when {
                                     card.vine -> null
+                                    card.suggested -> Icons.Filled.AutoAwesome
                                     card.category != null -> categoryGlyph(state.category(card.category)?.symbol)
                                     else -> Icons.Filled.People
                                 }
@@ -616,7 +624,8 @@ private fun SavedListPopup(title: String, mode: PlaybackMode, open: (Screen) -> 
 @Composable
 private fun CreatorCard(
     title: String, libraries: List<CreatorLibrary>, cardKey: String, category: String? = null,
-    form: VideoForm = VideoForm.SHORT, vine: Boolean = false, open: (Screen) -> Unit, modifier: Modifier = Modifier,
+    form: VideoForm = VideoForm.SHORT, vine: Boolean = false, suggested: Boolean = false, open: (Screen) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val state = LocalContext.current.curated.state
     val startMix = mixStarter(open)
@@ -652,6 +661,7 @@ private fun CreatorCard(
                     tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), modifier = Modifier.size(16.dp),
                 )
             }
+            if (suggested) Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = SuggestedPink, modifier = Modifier.size(18.dp))
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
             CountBadge(unplayed)
             Spacer(Modifier.weight(1f))
@@ -659,6 +669,11 @@ private fun CreatorCard(
                 showCaughtUp = !showCaughtUp
                 if (showCaughtUp && !expanded) {
                     if (unplayed > 0) state.setCollapsed(cardKey, false) else openedWhileEmpty = true
+                }
+            }
+            if (suggested) {
+                IconButton(onClick = { startMix(PlaybackMode.Automix(null, form, setOf(SUGGESTED_CARD))) }) {
+                    Icon(Icons.Filled.Shuffle, contentDescription = "Suggested Automix", tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
                 }
             }
             if (vine) {
@@ -752,6 +767,7 @@ private fun CreatorCell(library: CreatorLibrary, modifier: Modifier, onClick: ()
             UnplayedBadge(unplayed, Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-2).dp))
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            AddToCreatorsItem(library) { menu = false }
             OlderVideosItem(library) { menu = false }
             OpenCreatorItem(library) { menu = false }
             MarkAllItems(library) { menu = false }

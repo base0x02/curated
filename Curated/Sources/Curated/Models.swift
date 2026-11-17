@@ -24,6 +24,8 @@ enum Paths {
     static var positions: URL { appSupport.appendingPathComponent("positions.json") }
     static var positionMarks: URL { appSupport.appendingPathComponent("positionmarks.json") }
     static var nowPlaying: URL { appSupport.appendingPathComponent("nowplaying.json") }
+    /// How the last look at each suggested feed went (`SuggestedStatus`), written by the app and the overnight job.
+    static var suggested: URL { appSupport.appendingPathComponent("suggested.json") }
     static var logs: URL {
         let url = appSupport.appendingPathComponent("logs", isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -80,6 +82,9 @@ struct Creator: Codable, Identifiable, Hashable {
     /// videos never downloaded (newest of them first). nil uses the day window. Long videos always use the window.
     var keepVideos: Int? = nil
     var keepHistorical = false
+    /// A creator met in someone's For You or Shorts feed (see Suggested.swift), made up when the library is scanned.
+    /// Never in `Config.creators`: following one adds a plain creator in its place.
+    var suggested = false
 
     static let playlistLimits = [5, 10, 25, 50, 100]
 
@@ -93,10 +98,11 @@ struct Creator: Codable, Identifiable, Hashable {
     /// A playlist's key is "youtube-playlist@<ID>"; its folder holds its videos as well as its title.
     /// A Vine author's is "vine@<their Vine user ID>".
     var id: String {
+        if suggested { return Suggested.folderPrefix(platform) + username }
         switch platform {
-        case .tiktok: username
-        case .vine: "vine@\(username)"
-        case .youtube: playlist ? "youtube-playlist@\(username)" : "youtube@\(username)"
+        case .tiktok: return username
+        case .vine: return "vine@\(username)"
+        case .youtube: return playlist ? "youtube-playlist@\(username)" : "youtube@\(username)"
         }
     }
 
@@ -157,6 +163,7 @@ struct Creator: Codable, Identifiable, Hashable {
         playlistLimit = try c.decodeIfPresent(Int.self, forKey: .playlistLimit)
         keepVideos = try c.decodeIfPresent(Int.self, forKey: .keepVideos)
         keepHistorical = try c.decodeIfPresent(Bool.self, forKey: .keepHistorical) ?? false
+        suggested = try c.decodeIfPresent(Bool.self, forKey: .suggested) ?? false
     }
 
     /// The ID in a YouTube playlist link ("…list=PL…"), if the input is one.
@@ -343,6 +350,8 @@ struct AppSettings: Codable, Equatable {
     var ipodMixMinutes = 30
     var ipodCategories: [String] = []
     var ipodExportPath: String?
+    /// Suggested short videos from the signed-in TikTok For You and YouTube Shorts feeds (see Suggested.swift).
+    var suggested = SuggestedSettings()
 
     var libraryURL: URL { URL(fileURLWithPath: libraryPath, isDirectory: true) }
 
@@ -387,6 +396,7 @@ struct AppSettings: Codable, Equatable {
         ipodMixMinutes = try c.decodeIfPresent(Int.self, forKey: .ipodMixMinutes) ?? d.ipodMixMinutes
         ipodCategories = try c.decodeIfPresent([String].self, forKey: .ipodCategories) ?? d.ipodCategories
         ipodExportPath = try c.decodeIfPresent(String.self, forKey: .ipodExportPath)
+        suggested = (try? c.decodeIfPresent(SuggestedSettings.self, forKey: .suggested)) ?? d.suggested
     }
 }
 

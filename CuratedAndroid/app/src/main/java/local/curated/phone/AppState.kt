@@ -40,6 +40,15 @@ class AppState(private val context: Context) {
     var longLibraries by mutableStateOf(emptyList<CreatorLibrary>()); private set
     /** Vine authors with Vines on this phone. Short videos, kept apart from `libraries` (no category, no Top list). */
     var vineLibraries by mutableStateOf(emptyList<CreatorLibrary>()); private set
+    /**
+     * Creators from the Mac's suggested feeds with a video on this phone (API 11). Short videos, kept apart from
+     * `libraries` like Vines: a Suggested card, no category, no Top list.
+     */
+    var suggestedLibraries by mutableStateOf(emptyList<CreatorLibrary>()); private set
+    /** Suggested creators to add on the Mac, sent at the next sync when the Mac couldn't be reached. */
+    var pendingFollows by mutableStateOf(store.loadPendingFollows()); private set
+    /** A suggested creator being added to the Mac's creators (FollowSuggestedDialog). */
+    var followingSuggested by mutableStateOf<String?>(null)
     /** Which Home is showing: short or long videos. Always short at launch, as on the Mac. */
     var form by mutableStateOf(VideoForm.SHORT)
     /** What Sync and automatic sync download: short videos, long ones, or both. */
@@ -168,7 +177,7 @@ class AppState(private val context: Context) {
 
     fun category(id: String?): Category? = id?.let { categories.firstOrNull { c -> c.id == it } }
     fun library(username: String, form: VideoForm = VideoForm.SHORT): CreatorLibrary? =
-        (if (form == VideoForm.SHORT) libraries + vineLibraries else longLibraries).firstOrNull { it.id == username }
+        (if (form == VideoForm.SHORT) libraries + vineLibraries + suggestedLibraries else longLibraries).firstOrNull { it.id == username }
 
     /** A form's creators (and, for long videos, playlists), or only those in `category`. */
     fun libraries(category: String?, form: VideoForm = VideoForm.SHORT): List<CreatorLibrary> {
@@ -186,7 +195,11 @@ class AppState(private val context: Context) {
      */
     fun automixLibraries(category: String?, form: VideoForm): List<CreatorLibrary> {
         val off = if (category == null) playbackRules.cards(form).automixOff else emptySet()
-        val mix = mixLibraries(category, form).filter { cardKey(it.creator) !in off }
+        var mix = mixLibraries(category, form).filter { cardKey(it.creator) !in off }
+        // Suggestions take one creator's share of the main Automix, as on the Mac.
+        if (form == VideoForm.SHORT && category == null && suggestedLibraries.isNotEmpty() && SUGGESTED_CARD !in off) {
+            mix = mix + allSuggested()
+        }
         val vines = vineLibraries
         if (form != VideoForm.SHORT || vines.isEmpty() || VINE_CARD in off || (category != null && category !in manifest?.vineCategories.orEmpty())) return mix
         return mix + allVines(vines)
@@ -195,6 +208,7 @@ class AppState(private val context: Context) {
     /** Home's card a creator is under, as named in a mix's `picked` and the playback rules. */
     fun cardKey(creator: Creator): String = when {
         creator.isVine -> VINE_CARD
+        creator.isSuggested -> SUGGESTED_CARD
         creator.playlist -> PLAYLIST_CARD
         else -> category(creator.category)?.id ?: OTHER_CARD
     }
@@ -246,10 +260,19 @@ class AppState(private val context: Context) {
 
     /** Automix for a pick of Home's cards: Vines only when their card is picked. */
     fun automixLibraries(picked: Set<String>, form: VideoForm): List<CreatorLibrary> {
-        val mix = mixLibraries(picked, form)
+        // The Suggested card's own Automix: each suggested creator as a creator.
+        if (form == VideoForm.SHORT && picked == setOf(SUGGESTED_CARD)) return suggestedLibraries
+        var mix = mixLibraries(picked, form)
+        if (form == VideoForm.SHORT && suggestedLibraries.isNotEmpty() && SUGGESTED_CARD in picked) mix = mix + allSuggested()
         val vines = vineLibraries
         if (form != VideoForm.SHORT || vines.isEmpty() || VINE_CARD !in picked) return mix
         return mix + allVines(vines)
+    }
+
+    /** Every suggestion as one creator, newest first. */
+    private fun allSuggested(): CreatorLibrary {
+        val all = Creator(SUGGESTED_TIKTOK_PREFIX + "all", "Suggested", 1, null, hasAvatar = false, suggested = true)
+        return CreatorLibrary(all, suggestedLibraries.flatMap { it.videos }.sortedByDescending { it.date })
     }
 
     /** Every Vine as one creator, so they take about one creator's share of a mix. */
@@ -265,7 +288,7 @@ class AppState(private val context: Context) {
     val playlistLibraries: List<CreatorLibrary> get() = longLibraries.filter { it.creator.playlist }
 
     /** Every video on the phone, short and long, once each (a video can be both a creator's and in a playlist). */
-    val allVideos: List<Video> get() = (libraries + longLibraries + vineLibraries).flatMap { it.videos }.distinctBy { it.id }
+    val allVideos: List<Video> get() = (libraries + longLibraries + vineLibraries + suggestedLibraries).flatMap { it.videos }.distinctBy { it.id }
 
     fun isPlayed(video: Video) = video.id in played
 
@@ -290,7 +313,7 @@ class AppState(private val context: Context) {
 
     /** A form's videos on this phone, once each: its creators', and for short videos the Vines. */
     private fun videos(form: VideoForm): List<Video> =
-        (libraries(null, form) + if (form == VideoForm.SHORT) vineLibraries else emptyList()).flatMap { it.videos }.distinctBy { it.id }
+        (libraries(null, form) + if (form == VideoForm.SHORT) vineLibraries + suggestedLibraries else emptyList()).flatMap { it.videos }.distinctBy { it.id }
 
     // MARK: Resume
 
@@ -511,14 +534,16 @@ class AppState(private val context: Context) {
      * built from its `order`: every long video on the phone in it, whichever creator it came under.
      */
     private fun rebuildLibraries() {
-        val m = manifest ?: run { libraries = emptyList(); longLibraries = emptyList(); vineLibraries = emptyList(); return }
+        val m = manifest ?: run {
+            libraries = emptyList(); longLibraries = emptyList(); vineLibraries = emptyList(); suggestedLibraries = emptyList(); return
+        }
         val downloaded = m.videos.filter { store.isDownloaded(it) }
         val short = downloaded.filter { it.form == VideoForm.SHORT }.groupBy { it.creator }
         val long = downloaded.filter { it.form == VideoForm.LONG }.groupBy { it.creator }
         val sentLong = m.videos.filter { it.form == VideoForm.LONG }.map { it.creator }.toSet()
         val sentShort = m.videos.filter { it.form == VideoForm.SHORT }.map { it.creator }.toSet()
         libraries = m.creators
-            .filter { !it.playlist && !it.isVine && (it.username in sentShort || it.username !in sentLong) }
+            .filter { !it.playlist && !it.isVine && !it.isSuggested && (it.username in sentShort || it.username !in sentLong) }
             .map { CreatorLibrary(it, short[it.username].orEmpty().sortedByDescending { v -> v.date }) }
         longLibraries = m.creators
             .filter { it.playlist || it.username in sentLong }
@@ -536,6 +561,57 @@ class AppState(private val context: Context) {
         vineLibraries = m.creators.filter { it.isVine }
             .map { CreatorLibrary(it, short[it.username].orEmpty().sortedByDescending { v -> v.date }) }
             .filter { it.videos.isNotEmpty() }
+        suggestedLibraries = m.creators.filter { it.isSuggested }
+            .map { CreatorLibrary(it, short[it.username].orEmpty().sortedByDescending { v -> v.date }) }
+            .filter { it.videos.isNotEmpty() }
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.creator.displayName })
+    }
+
+    // MARK: Suggested creators
+
+    /** Whether adding this suggested creator is waiting for the next sync. */
+    fun isFollowPending(creatorKey: String) = pendingFollows.any { it.creator == creatorKey }
+
+    /**
+     * Adds a suggested creator to the Mac's creators in `category`. When the Mac can't be reached, it waits for the
+     * next sync. Returns what to tell the user.
+     */
+    suspend fun followSuggested(creatorKey: String, category: String?): String {
+        val name = library(creatorKey)?.creator?.displayName ?: "@${creatorHandle(creatorKey)}"
+        macClient()?.let { client ->
+            try {
+                val reply = withContext(Dispatchers.IO) { client.followSuggested(creatorKey, category) }
+                if (reply.optBoolean("ok")) syncInBackground()
+                return reply.optString("message", "Added $name.")
+            } catch (e: SyncException) {
+                if (e.status == 404) return "Your Mac needs updating to add suggested creators."
+            } catch (_: Exception) {
+                // Couldn't finish: try again at the next sync.
+            }
+        }
+        pendingFollows = pendingFollows.filter { it.creator != creatorKey } + PendingFollow(creatorKey, category, Instant.now())
+        store.savePendingFollows(pendingFollows)
+        return "Your Mac isn't reachable right now. $name will be added at the next sync."
+    }
+
+    /** Sends the follows that waited for the Mac. Ones it refused are dropped; ones that couldn't be sent wait again. */
+    private suspend fun sendPendingFollows(client: SyncClient) {
+        val waiting = withContext(Dispatchers.Main) { pendingFollows }
+        if (waiting.isEmpty()) return
+        val left = waiting.filter { follow ->
+            try {
+                withContext(Dispatchers.IO) { client.followSuggested(follow.creator, follow.category) }
+                false
+            } catch (e: SyncException) {
+                e.status == 0 || e.status >= 500
+            } catch (_: Exception) {
+                true
+            }
+        }
+        withContext(Dispatchers.Main) {
+            pendingFollows = left
+            store.savePendingFollows(left)
+        }
     }
 
     // MARK: Pairing
@@ -581,6 +657,8 @@ class AppState(private val context: Context) {
         store.savePlayed(emptyMap())
         store.saveWatchLater(emptyMap())
         store.saveBookmarks(emptyMap())
+        pendingFollows = emptyList()
+        store.savePendingFollows(emptyList())
         collapsedCards = emptySet()
         lastSyncMessage = null
         lastSyncAt = null
@@ -792,9 +870,11 @@ class AppState(private val context: Context) {
         )
 
         syncLap("find Mac (${client.host})")
+        // Suggested creators added while the Mac was out of reach: before the list, so it already has them moved.
+        sendPendingFollows(client)
         step("Checking for new videos…")
-        // Vines come with the short videos: listed every time, downloaded when short videos are.
-        val manifestText = withContext(Dispatchers.IO) { client.manifest(SyncForms.All, vine = true) }
+        // Vines and suggestions come with the short videos: listed every time, downloaded when short videos are.
+        val manifestText = withContext(Dispatchers.IO) { client.manifest(SyncForms.All, vine = true, suggested = true) }
         val newManifest = Manifest.parse(manifestText)
 
         step("Syncing watched videos…")

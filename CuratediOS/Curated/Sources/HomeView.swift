@@ -85,6 +85,11 @@ struct HomeView: View {
                     CreatorCard(title: "Vine", libraries: app.vineLibraries, cardKey: "vine", category: nil, open: open,
                                 vine: true)
                 }
+                // Creators from the Mac's suggested feeds, while it has any.
+                if app.form == .short && !app.suggestedLibraries.isEmpty {
+                    CreatorCard(title: "Suggested", libraries: app.suggestedLibraries, cardKey: suggestedCard, category: nil,
+                                open: open, suggested: true)
+                }
                 // Always the last card.
                 if app.form == .long && !app.playlistLibraries.isEmpty {
                     PlaylistsCard(playlists: app.playlistLibraries, open: open)
@@ -404,6 +409,9 @@ struct MixPicker: View {
         if pick == .automix && !app.vineLibraries.isEmpty {
             options.append(Option(id: vineCard, name: "Vine", symbol: nil, count: count(vineCard)))
         }
+        if pick == .automix && !app.suggestedLibraries.isEmpty {
+            options.append(Option(id: suggestedCard, name: "Suggested", symbol: "sparkles", count: count(suggestedCard)))
+        }
         return options.filter { $0.count > 0 } + options.filter { $0.count == 0 }
     }
 
@@ -584,6 +592,8 @@ struct CreatorCard: View {
     var form = VideoForm.short
     /// The Vine card: the Vine V before its title, and a Vine Automix button.
     var vine = false
+    /// The Suggested card: pink sparkles before its title, and its own Automix button.
+    var suggested = false
 
     /// Before the title, as in the mix picker: the category's glyph from the Mac, or two people for "Other Creators".
     private var glyph: String? {
@@ -613,6 +623,8 @@ struct CreatorCard: View {
                             .rotationEffect(.degrees(expanded ? 90 : 0))
                         if vine {
                             Image("VineGlyph").resizable().scaledToFit().frame(height: 15).foregroundStyle(.secondary)
+                        } else if suggested {
+                            Image(systemName: "sparkles").font(.subheadline.weight(.semibold)).foregroundStyle(Color.suggestedPink)
                         } else if let glyph {
                             Image(systemName: glyph).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
                         }
@@ -660,6 +672,9 @@ struct CreatorCard: View {
 
                     if vine {
                         mixButton("shuffle", .vineAutomix, label: "Vine Automix")
+                    }
+                    if suggested {
+                        mixButton("shuffle", .automix(nil, picked: [suggestedCard]), label: "Suggested Automix")
                     }
                     if let category {
                         if form == .short {
@@ -793,6 +808,9 @@ struct CreatorMenuButtons: View {
     let library: CreatorLibrary
 
     var body: some View {
+        if library.creator.isSuggested {
+            Button("Add to Creators…", systemImage: "person.crop.circle.badge.plus") { router.followingSuggested = library.id }
+        }
         if library.form == .long && library.creator.isYouTube && !library.creator.isPlaylist {
             Button("Older Videos…", systemImage: "clock.arrow.circlepath") {
                 router.olderVideos = OlderVideosTarget(id: library.id, name: library.creator.displayName)

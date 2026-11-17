@@ -188,6 +188,7 @@ struct SideTray: View {
                 Text(creatorName(video)).font(.headline).lineLimit(1)
                 Text(playback.positionLabel(video, mode: mode)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
+            SuggestedFollowButton(creatorKey: video.creator)
             Spacer(minLength: 0)
             if let views = video.viewCount {
                 VStack(spacing: 2) {

@@ -33,12 +33,18 @@ import Foundation
 ///   GET  /creators/<id>/older   (API 10) server-sent events of the long videos not downloaded yet: {"videos", "done", "error"?}. Leaving stops the listing
 ///   POST /creators/<id>/older   (API 10) {"ids", "skip"?, "heights"?: {id: height, 0 for Best}} → {"ok", "started", "message"}
 ///   GET  /older-thumbnail/<id>  (API 10) a video's YouTube thumbnail, through the Mac
+///   GET  /manifest?…&suggested=1 (API 11) also the suggested short videos, while suggestions are on: under made-up creators
+///                               ("suggested-tiktok@<username>", "suggested-youtube@<handle>", with "suggested": true and
+///                               "platform"). Phones that don't ask never see them
+///   POST /suggested/follow      (API 11) {"creator": <suggested creator key>, "category"?: <category id>} → {"ok", "message", "creatorID"?}:
+///                               adds the creator as a plain one in that category; their suggested videos move to them
 extension AppModel {
     /// 2: long videos (manifest `forms`, `/poster`). 3: Vines (manifest `vine`). Phones from before them ask for
     /// neither and get what they always did. 4: `/positions`. 5: its `nowPlaying`. 6: `/download`, `lastDownloadAt`.
     /// 7: `/download/progress`. 8: `/positions`' `playback`. 9: videos' `pickedAt`.
     /// 10: `/creators/form`, `/creators`, `/creators/<id>/older`, `/older-thumbnail/<id>`.
-    static let syncAPIVersion = 10
+    /// 11: suggested videos (manifest `suggested`), `/suggested/follow`.
+    static let syncAPIVersion = 11
     static let pairingDuration: TimeInterval = 300
     private static let maxFailedPairings = 5
 
@@ -128,6 +134,10 @@ extension AppModel {
             var vine: Bool?
             /// API 10: a channel with long videos on, whose older videos can be asked for. Sent whether or not it has any.
             var longForm: Bool?
+            /// API 11: a creator met in a suggested feed, not followed. Their videos are short, and they have no category.
+            var suggested: Bool?
+            /// API 11, suggested creators only: "tiktok" or "youtube".
+            var platform: String?
         }
         struct VideoInfo: Encodable {
             let id: String
@@ -193,9 +203,10 @@ extension AppModel {
         case ("GET", "manifest", 1):
             if let i = syncDevices.firstIndex(where: { $0.id == device.id }) { syncDevices[i].lastSync = Date() }
             let forms = Set((request.query["forms"] ?? "short").split(separator: ",").compactMap { VideoForm(rawValue: String($0)) })
-            return json(manifest(forms: forms.isEmpty ? [.short] : forms, vine: request.query["vine"] == "1"))
+            return json(manifest(forms: forms.isEmpty ? [.short] : forms, vine: request.query["vine"] == "1",
+                                 suggested: request.query["suggested"] == "1"))
         case ("GET", "video", 2):
-            guard let video = (libraries + longLibraries + vineLibraries).lazy.flatMap(\.videos).first(where: { $0.id == parts[1] }) else {
+            guard let video = (libraries + longLibraries + vineLibraries + suggestedLibraries).lazy.flatMap(\.videos).first(where: { $0.id == parts[1] }) else {
                 return .error(404, "No such video")
             }
             return .file(video.url, contentType: video.url.pathExtension.lowercased() == "mov" ? "video/quicktime" : "video/mp4")
@@ -230,6 +241,15 @@ extension AppModel {
             return requestOlderVideos(of: parts[1], from: request, device: device)
         case ("GET", "older-thumbnail", 2):
             return olderThumbnail(parts[1])
+        case ("POST", "suggested", 2) where parts[1] == "follow":
+            struct Follow: Decodable { let creator: String; let category: UUID? }
+            struct Reply: Encodable { let ok: Bool; let message: String; let creatorID: String? }
+            guard let body = try? Self.decoder.decode(Follow.self, from: request.body) else {
+                return .error(400, "Expected {\"creator\", \"category\"?}")
+            }
+            let result = followSuggested(body.creator, category: body.category)
+            if result.ok { DownloadLog.info("\(device.name) followed \(body.creator) from Suggested") }
+            return json(Reply(ok: result.ok, message: result.message, creatorID: result.creatorID))
         case ("POST", "download", 1):
             return json(forceDownload(for: device))
         case ("GET", "download", 2) where parts[1] == "progress":
@@ -251,6 +271,8 @@ extension AppModel {
             progress.total = downloadUnits
             progress.current = statuses.filter { $0.value == .downloading }.keys.map { id in
                 if id == Vine.feedID { return "Vines" }
+                if id == Suggested.feedID(.tiktok) { return "Suggested TikTok" }
+                if id == Suggested.feedID(.youtube) { return "Suggested YouTube" }
                 return library(for: id)?.displayName ?? library(for: id, form: .long)?.displayName ?? id
             }.sorted()
         }
@@ -269,7 +291,7 @@ extension AppModel {
         if longPick != nil {
             return ForceDownloadReply(started: false, message: "The long-video picker is open on your Mac. Close it and try again.")
         }
-        if config.creators.isEmpty && !settings.vineEnabled {
+        if config.creators.isEmpty && !settings.vineEnabled && !settings.suggested.anyOn {
             return ForceDownloadReply(started: false, message: "Your Mac has no creators to download.")
         }
         downloadAll()
@@ -312,9 +334,10 @@ extension AppModel {
     /// creators with long videos on, and playlists. A creator with both is listed once. Each video is sent once: one
     /// that's also in a playlist comes under its creator, and the playlist lists it in its `order`. With `vine`, the
     /// Vines come along with the short videos.
-    private func manifest(forms: Set<VideoForm>, vine: Bool = false) -> Manifest {
+    private func manifest(forms: Set<VideoForm>, vine: Bool = false, suggested: Bool = false) -> Manifest {
         let vines = vine && forms.contains(.short) ? vineLibraries : []
-        let short = (forms.contains(.short) ? watchLibraries(.short) : []) + vines
+        let suggestions = suggested && forms.contains(.short) ? suggestedLibraries : []
+        let short = (forms.contains(.short) ? watchLibraries(.short) : []) + vines + suggestions
         // Creators before playlists, so a video in both is sent as the creator's.
         let long = forms.contains(.long) ? longLibraries.filter { !$0.creator.playlist } + playlistLibraries : []
         var creators: [Manifest.CreatorInfo] = []
@@ -329,7 +352,9 @@ extension AppModel {
                 playlist: creator.playlist ? true : nil,
                 order: creator.playlist ? library.videos.map(\.id) : nil,
                 vine: creator.platform == .vine ? true : nil,
-                longForm: creator.canPickOlderLong ? true : nil))
+                longForm: creator.canPickOlderLong ? true : nil,
+                suggested: creator.suggested ? true : nil,
+                platform: creator.suggested ? creator.platform.rawValue : nil))
         }
         var sent: Set<String> = []
         let videos = (short + long).flatMap(\.videos).filter { sent.insert($0.id).inserted }.map { video in

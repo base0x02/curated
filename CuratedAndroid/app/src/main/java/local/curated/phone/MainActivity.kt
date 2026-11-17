@@ -396,6 +396,7 @@ fun CuratedRoot(stack: SnapshotStateList<Screen>, fold: FoldingFeature?) {
                 stack.removeAll { it is Screen.Latest }
             }
         }
+        appState.followingSuggested?.let { key -> FollowSuggestedDialog(key) { appState.followingSuggested = null } }
         appState.olderVideos?.let { target ->
             OlderVideosScreen(target) { appState.olderVideos = null }
             return@BoxWithConstraints

@@ -236,6 +236,10 @@ private struct DownloadsSettings: View {
                     .fixedSize(horizontal: false, vertical: true)
                 }
 
+                CardGroup("Suggested Short Videos", note: "A few videos from the top of your own For You and Shorts feeds, in a Suggested card, to find new creators. Each download clears out the ones you've watched and tops them back up. Needs you signed in.") {
+                    SuggestedSettingsCards()
+                }
+
                 CardGroup("Vine") {
                     HStack(spacing: 14) {
                         VineLogo(size: 40)
@@ -489,7 +493,7 @@ struct MenuPill<Content: View>: View {
 extension CookieBrowser {
     var menuLabel: String { self == .none ? "Not signed in" : label }
 
-    private var bundleID: String? {
+    var bundleID: String? {
         switch self {
         case .none: nil
         case .safari: "com.apple.Safari"

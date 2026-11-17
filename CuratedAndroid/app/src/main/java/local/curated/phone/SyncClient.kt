@@ -40,8 +40,9 @@ class SyncClient(val host: String, val port: Int, private val token: String? = n
      * Short videos only unless `forms` asks for long ones too, and the Vines with `vine` (a Mac from before long
      * videos or Vines ignores what it doesn't know).
      */
-    fun manifest(forms: SyncForms = SyncForms.Short, vine: Boolean = false): String {
-        val query = listOfNotNull(if (forms == SyncForms.Short) null else "forms=${forms.query}", if (vine) "vine=1" else null)
+    fun manifest(forms: SyncForms = SyncForms.Short, vine: Boolean = false, suggested: Boolean = false): String {
+        val query = listOfNotNull(if (forms == SyncForms.Short) null else "forms=${forms.query}", if (vine) "vine=1" else null,
+            if (suggested) "suggested=1" else null)
         return request("GET", "/manifest" + if (query.isEmpty()) "" else query.joinToString("&", prefix = "?"))
     }
 
@@ -85,6 +86,10 @@ class SyncClient(val host: String, val port: Int, private val token: String? = n
 
     fun addCreator(formVersion: Int, values: Map<String, String>): JSONObject =
         JSONObject(request("POST", "/creators", JSONObject().put("formVersion", formVersion).put("values", JSONObject(values))))
+
+    /** API 11: adds a suggested creator to the Mac's creators, in a category. {"ok", "message", "creatorID"?} */
+    fun followSuggested(creator: String, category: String?): JSONObject =
+        JSONObject(request("POST", "/suggested/follow", JSONObject().put("creator", creator).put("category", category ?: JSONObject.NULL)))
 
     /** Follows the Mac's listing of a creator's older videos. Returns when it's done; cancelling closes it at the next event. */
     suspend fun followOlderVideos(creator: String, onEvent: suspend (OlderVideosEvent) -> Unit) {

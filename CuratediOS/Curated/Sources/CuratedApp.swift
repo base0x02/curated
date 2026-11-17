@@ -136,6 +136,8 @@ final class Router {
     var olderVideos: OlderVideosTarget?
     /// The add-creator form, from Home's + (AddCreatorView).
     var addingCreator = false
+    /// A suggested creator being added to the Mac's creators (FollowSuggestedSheet).
+    var followingSuggested: String?
 
     /// Long-pressing Automix or Top 15: the popup picking which cards it plays from (RootView shows it over everything).
     var picking: MixPick?
@@ -271,6 +273,10 @@ struct RootView: View {
         // On its own view: two presentations on one view get in each other's way.
         .background { Color.clear.sheet(item: Bindable(router).olderVideos) { OlderVideosView(target: $0) } }
         .background { Color.clear.sheet(isPresented: Bindable(router).addingCreator) { AddCreatorView() } }
+        .background {
+            Color.clear.sheet(item: Binding(get: { router.followingSuggested.map(SuggestedKey.init) },
+                                            set: { router.followingSuggested = $0?.id })) { FollowSuggestedSheet(creatorKey: $0.id) }
+        }
         .overlay {
             if router.onboarding {
                 OnboardingView {

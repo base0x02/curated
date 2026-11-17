@@ -354,3 +354,13 @@ Release of everything since 1.5: phone sync with the Fold and the new pairing sc
 
 - Latest for long videos now opens as a grid of thumbnails, like a creator's gallery, with each card naming its creator. Picking a video plays the list from there, and a back button returns to the grid
 - The main Latest puts the unwatched Suggestions playlist first, in its own order, then every other unwatched long video, creators' and playlists' alike, newest first. A category's Latest is its creators' videos, hand-picked ones first. Its unwatched count on Home matches the list
+
+## 2.3 · 2026-11-17
+
+- Suggested short videos: new in Settings → Downloads, turned on separately for TikTok's For You feed and YouTube's Shorts, each keeping a chosen number of unwatched suggestions (3 by default). Each download (yours, a phone's Update Mac and the overnight one) clears out the watched ones and tops them back up from the top of your own feed, leaving out videos seen before and creators you already follow
+- They come in a Suggested card in the sidebar, shown only while suggestions are on and some are here, with its own Automix. Suggested creators have a dashed pink ring around their avatar, and the main Automix plays them as one more creator (Settings → Playback can leave them out)
+- YouTube Shorts are read with the YouTube sign-in borrowed from your browser. TikTok's For You feed is read by a hidden TikTok page in Curated, which borrows your TikTok browser's sign-in, or you can sign in to TikTok in Curated itself
+- When a feed finds you signed out or locked out, Curated says so in Settings and asks you to sign in (TikTok in Curated, YouTube in your browser), or to turn suggestions off. A problem the overnight download meets is asked about the next time Curated opens
+- Turning a platform's suggestions off asks before deleting its suggested videos, and Curated also asks at launch if suggested videos are still here with suggestions off
+- Right-click a suggested creator and choose Add to Creators… to follow them in a category of your choice: their suggested videos move to them and their recent videos download
+- Phones get the suggestions and can add a suggested creator from the player (API 11). An add asked for while the Mac was out of reach is made at the phone's next sync

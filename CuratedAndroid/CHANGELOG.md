@@ -276,3 +276,8 @@ Version now tracks the Mac app.
 - Leaving a long video's full screen now keeps the app upright until the phone is turned upright, instead of letting it turn again after a moment
 - A long video full screen has a speed menu, picture in picture, bookmark and watched buttons beside its title. Holding a long video for 2× now works on the right side only, matching double-tap to skip
 - The screen no longer stays on after a long video ends on the Up Next card, or while a call or another app has the sound
+
+## 2.3 · 2026-11-17
+
+- Suggested short videos from your Mac (Curated 2.3 for Mac, Settings → Downloads): a Suggested card on Home, shown while your Mac has suggestions, with its own Automix. Suggested creators have a dashed pink ring around their avatar, and the main Automix plays them as one more creator
+- While a suggested video plays, a pink Add button beside the creator's name adds them to your Mac's creators in the category you pick (also Add to Creators… when you hold their avatar). If your Mac can't be reached, the button says "Next sync" and the creator is added then

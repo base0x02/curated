@@ -19,6 +19,16 @@ struct Store {
     private var positionMarksFile: URL { root.appendingPathComponent("positionmarks.json") }
     private var nowPlayingFile: URL { root.appendingPathComponent("nowplaying.json") }
     private var playbackRulesFile: URL { root.appendingPathComponent("playbackrules.json") }
+    /// Suggested creators to add on the Mac at the next sync (`PendingFollow`).
+    var pendingFollowsFile: URL { root.appendingPathComponent("pendingfollows.json") }
+
+    func loadPendingFollows() -> [PendingFollow] {
+        (try? Data(contentsOf: pendingFollowsFile)).flatMap { try? JSONDecoder.curated.decode([PendingFollow].self, from: $0) } ?? []
+    }
+
+    func savePendingFollows(_ follows: [PendingFollow]) {
+        write(follows, to: pendingFollowsFile, with: .curated)
+    }
 
     /// Saves marks off the main thread, in order, so marking a video watched doesn't hold up the next one starting.
     private static let writer = DispatchQueue(label: "local.curated.store", qos: .utility)

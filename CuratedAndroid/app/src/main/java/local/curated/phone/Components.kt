@@ -67,7 +67,9 @@ fun Avatar(library: CreatorLibrary?, username: String, size: Dp, dimmed: Boolean
         value = withContext(Dispatchers.IO) { if (file.exists()) BitmapFactory.decodeFile(file.path) else null }
     }
     val image = bitmap
-    val ring = Modifier.border(maxOf(1.5.dp, size / 24), platformRing(username), CircleShape)
+    // Suggested creators get a dashed pink ring instead of their platform's.
+    val ring = if (isSuggestedKey(username)) Modifier.suggestedRing(size)
+        else Modifier.border(maxOf(1.5.dp, size / 24), platformRing(username), CircleShape)
     // Caught-up creators: grayscale and faded, so the ones with something new stand out.
     val fade = if (dimmed) Modifier.alpha(0.45f) else Modifier
     if (image != null) {
@@ -87,7 +89,7 @@ fun Avatar(library: CreatorLibrary?, username: String, size: Dp, dimmed: Boolean
         ) {
             Text(
                 // A Vine author's key is a number, so their name's first letter.
-                (if (username.startsWith(VINE_KEY_PREFIX)) library?.creator?.displayName.orEmpty() else username.removePrefix(YOUTUBE_KEY_PREFIX))
+                (if (username.startsWith(VINE_KEY_PREFIX)) library?.creator?.displayName.orEmpty() else creatorHandle(username))
                     .take(1).uppercase(), color = Color.White, fontWeight = FontWeight.SemiBold,
                 fontSize = (size.value * 0.45f).sp,
             )

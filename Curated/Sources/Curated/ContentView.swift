@@ -19,6 +19,7 @@ struct ContentView: View {
     @State private var otherSelection: SidebarItem?
     @AppStorage("otherCreatorsExpanded") private var otherCreatorsExpanded = true
     @AppStorage("vineExpanded") private var vineExpanded = true
+    @AppStorage("suggestedExpanded") private var suggestedExpanded = true
     @AppStorage("queueHidden") private var queueHidden = false
     @State private var showSync = false
     /// Where the sidebar was before Creators & Downloads, for its button to go back to when nothing is playing.
@@ -81,6 +82,13 @@ struct ContentView: View {
                         CreatorCard(title: "Vine", symbol: nil, vineLogo: true, libraries: model.vineLibraries,
                                     isExpanded: $vineExpanded, selection: $selection)
                     }
+                    // Creators from the For You and Shorts feeds, while suggestions are on and some are here.
+                    if form == .short, !model.suggestedLibraries.isEmpty {
+                        CreatorCard(title: "Suggested", symbol: "sparkles", symbolTint: Suggested.pink,
+                                    libraries: model.suggestedLibraries, isExpanded: $suggestedExpanded,
+                                    mixItem: .automix(nil, picked: [suggestedCard]), mixHelp: "Suggested Automix",
+                                    selection: $selection)
+                    }
                     // Always the last card.
                     if form == .long, !model.playlistLibraries.isEmpty {
                         PlaylistsCard(playlists: model.playlistLibraries, selection: $selection)
@@ -111,6 +119,7 @@ struct ContentView: View {
         .onChange(of: columnVisibility) { _, visibility in
             if visibility != .all { columnVisibility = .all }
         }
+        .suggestedPrompts()
         .onAppear {
             if selection == nil { selection = defaultSelection(form) }
             #if DEBUG
@@ -689,8 +698,12 @@ struct CreatorCard: View {
     let symbol: String?
     /// The Vine card shows the Vine V in place of a symbol.
     var vineLogo = false
+    var symbolTint: Color? = nil
     let libraries: [CreatorLibrary]
     @Binding var isExpanded: Bool
+    /// A card's own Automix button (the Suggested card).
+    var mixItem: SidebarItem? = nil
+    var mixHelp = "Automix"
     /// For a category: shows its Automix and Top buttons in the header.
     var category: UUID? = nil
     @Binding var selection: SidebarItem?
@@ -720,7 +733,7 @@ struct CreatorCard: View {
                         if vineLogo {
                             VineGlyph(height: 13).foregroundStyle(.secondary)
                         } else if let symbol {
-                            Image(systemName: symbol).foregroundStyle(.secondary)
+                            Image(systemName: symbol).foregroundStyle(symbolTint.map(AnyShapeStyle.init) ?? AnyShapeStyle(.secondary))
                         }
                         Text(title).fontWeight(.semibold).lineLimit(1).layoutPriority(1)
                         UnplayedCountCapsule(count: unplayed)
@@ -734,6 +747,9 @@ struct CreatorCard: View {
                     caughtUpToggle(count: caughtUp, expanded: expanded, unplayed: unplayed)
                     if vineLogo {
                         SidebarIconButton(symbol: "shuffle", help: "Vine Automix", item: .vineAutomix, selection: $selection)
+                    }
+                    if let mixItem {
+                        SidebarIconButton(symbol: "shuffle", help: mixHelp, item: mixItem, selection: $selection)
                     }
                     if let category {
                         if model.form == .long {
@@ -997,9 +1013,13 @@ struct UnplayedBadge: View {
 /// Holding or right-clicking a creator or playlist: its page on YouTube or TikTok. Vine authors and the Suggestions
 /// playlist have none.
 struct OpenCreatorButton: View {
+    @Environment(AppModel.self) private var model
     let creator: Creator
 
     var body: some View {
+        if creator.suggested {
+            Button("Add to Creators…") { model.followingSuggested = creator }
+        }
         if creator.platform != .vine && !creator.isSuggestions {
             Button("Open in \(creator.platform.name)") { NSWorkspace.shared.open(creator.profileURL) }
             Divider()
@@ -2153,7 +2173,14 @@ struct AvatarView: View {
         .frame(width: size, height: size)
         .clipShape(Circle())
         .overlay {
-            Circle().strokeBorder(library.creator.platform.ring, lineWidth: max(1.5, size / 24))
+            if library.creator.suggested {
+                // Suggested creators: a dashed pink ring, not the platform's.
+                Circle().strokeBorder(Suggested.pink,
+                                      style: StrokeStyle(lineWidth: max(2, size / 18), lineCap: .round,
+                                                         dash: [max(3, size / 9), max(2.5, size / 14)]))
+            } else {
+                Circle().strokeBorder(library.creator.platform.ring, lineWidth: max(1.5, size / 24))
+            }
         }
     }
 }

@@ -19,6 +19,24 @@ final class AppModel {
     /// Vine authors (see Vine.swift), while Vine is turned on. Short videos, but kept apart from `libraries` so they
     /// stay out of Top lists, Creators & Downloads' creator list and phones that don't ask for them.
     var vineLibraries: [CreatorLibrary] = []
+    /// Suggested creators (see Suggested.swift) of the platforms with suggestions on. Short videos, kept apart from
+    /// `libraries` like Vine's: their own sidebar card, no Top lists, and phones only get them when they ask.
+    var suggestedLibraries: [CreatorLibrary] = []
+    /// How the last look at each suggested feed went, by platform (`suggested.json`).
+    var suggestedStatus: [String: SuggestedStatus] = [:]
+    /// Something about suggestions to ask the user: sign in, or delete videos left over with the feature off.
+    var suggestedPrompt: SuggestedPrompt?
+    /// The TikTok sign-in sheet, open on this page while non-nil.
+    var tiktokSignInURL: URL?
+    /// Suggested creators being followed, with the category picked (the Add to Creators sheet).
+    var followingSuggested: Creator?
+    /// Whether the running download includes suggestions.
+    private(set) var downloadingSuggested = false
+    /// When the last sign-in problem was put to the user, so one the overnight job found is only asked about once.
+    @ObservationIgnored private(set) var promptedProblemAt = UserDefaults.standard.object(forKey: "suggestedPromptedAt") as? Date
+    func markPrompted(_ date: Date) { promptedProblemAt = date }
+    /// Suggested creators followed while a download ran, whose videos move when it's done.
+    @ObservationIgnored var pendingFollows: [(Creator, Creator)] = []
     /// Which sidebar is showing: short or long videos. Always short at launch.
     #if DEBUG
     var form: VideoForm = ProcessInfo.processInfo.environment["CURATED_TEST_FORM"] == "long" ? .long : .short  // for tests
@@ -109,6 +127,8 @@ final class AppModel {
                 || newValue.scheduleTimes != config.settings.scheduleTimes
             let libraryChanged = newValue.libraryPath != config.settings.libraryPath
                 || newValue.vineEnabled != config.settings.vineEnabled
+                || newValue.suggested.tiktok != config.settings.suggested.tiktok
+                || newValue.suggested.youtube != config.settings.suggested.youtube
             let syncChanged = newValue.syncEnabled != config.settings.syncEnabled
                 || newValue.syncDiscoverable != config.settings.syncDiscoverable
             config.settings = newValue
@@ -123,6 +143,7 @@ final class AppModel {
         Scheduler.sync(config.settings)  // keeps the LaunchAgent pointing at this copy of the app
         reloadLibrary()
         updateSyncServer()
+        checkSuggestedLeftovers()
         #if DEBUG
         // Lets a test pair without clicking through the UI. Compiled out of release builds.
         if let code = ProcessInfo.processInfo.environment["CURATED_TEST_PAIRING_CODE"] { startPairing(code: code) }
@@ -141,6 +162,11 @@ final class AppModel {
             longLibraries.append(Library.scan(.suggestions, form: .long, settings: settings))
         }
         vineLibraries = settings.vineEnabled ? Vine.scan(settings: settings) : []
+        suggestedLibraries = Suggested.platforms.filter(settings.suggested.isOn)
+            .flatMap { Suggested.scan($0, settings: settings) }
+            .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+        suggestedStatus = SuggestedStatus.loadAll()
+        promptSignInIfNeeded()
         runState = RunState.load()
         loadMissingDurations()
     }
@@ -155,7 +181,7 @@ final class AppModel {
     }
 
     private func loadMissingDurations() {
-        let missing = (libraries + longLibraries + vineLibraries).flatMap(\.videos)
+        let missing = (libraries + longLibraries + vineLibraries + suggestedLibraries).flatMap(\.videos)
             .filter { $0.duration == nil && loadedDurations[$0.id] == nil && !loadingDurations.contains($0.id) }
         guard !missing.isEmpty else { return }
         loadingDurations.formUnion(missing.map(\.id))
@@ -167,7 +193,7 @@ final class AppModel {
     }
 
     func library(for creatorID: String, form: VideoForm = .short) -> CreatorLibrary? {
-        (form == .short ? libraries + vineLibraries : longLibraries).first { $0.id == creatorID }
+        (form == .short ? libraries + vineLibraries + suggestedLibraries : longLibraries).first { $0.id == creatorID }
     }
 
     /// The creators shown in a form's sidebar: everyone with that form turned on, or only those in `category`.
@@ -196,7 +222,11 @@ final class AppModel {
     /// With no `category` it's the main Automix, which leaves out the cards turned off in Settings.
     func automixLibraries(_ form: VideoForm, in category: UUID? = nil) -> [CreatorLibrary] {
         let off = category == nil ? settings.playbackRules.cards(form).automixOff : []
-        let libraries = mixLibraries(form, in: category).filter { !off.contains(cardKey($0.creator)) }
+        var libraries = mixLibraries(form, in: category).filter { !off.contains(cardKey($0.creator)) }
+        // Suggestions take one creator's share of the main Automix.
+        if form == .short, category == nil, !suggestedLibraries.isEmpty, !off.contains(suggestedCard) {
+            libraries.append(suggestedMixLibrary)
+        }
         guard form == .short, !vineLibraries.isEmpty, !off.contains(vineCard),
               category == nil || self.category(category).map({ Vine.categoryNames.contains($0.name.lowercased()) }) == true
         else { return libraries }
@@ -206,6 +236,7 @@ final class AppModel {
     /// The sidebar card a creator is under, as named in a mix's `picked` and the playback rules.
     func cardKey(_ creator: Creator) -> String {
         if creator.platform == .vine { return vineCard }
+        if creator.suggested { return suggestedCard }
         if creator.playlist { return playlistCard }
         return category(creator.category)?.id.uuidString ?? otherCard
     }
@@ -256,7 +287,10 @@ final class AppModel {
 
     /// Automix for a pick of the sidebar's cards: Vines only when their card is picked.
     func automixLibraries(_ form: VideoForm, picked: Set<String>) -> [CreatorLibrary] {
-        let libraries = mixLibraries(form, picked: picked)
+        // The Suggested card's own Automix: each suggested creator as a creator.
+        if form == .short, picked == [suggestedCard] { return suggestedLibraries }
+        var libraries = mixLibraries(form, picked: picked)
+        if form == .short, !suggestedLibraries.isEmpty, picked.contains(suggestedCard) { libraries.append(suggestedMixLibrary) }
         guard form == .short, !vineLibraries.isEmpty, picked.contains(vineCard) else { return libraries }
         return libraries + [Vine.mixLibrary(vineLibraries)]
     }
@@ -389,7 +423,7 @@ final class AppModel {
     /// A form's videos, once each: a long video can be both a creator's and in a playlist.
     private func uniqueVideos(_ form: VideoForm) -> [Video] {
         var seen: Set<String> = []
-        let vines = form == .short ? vineLibraries : []
+        let vines = form == .short ? vineLibraries + suggestedLibraries : []
         return (watchLibraries(form) + vines).flatMap(\.videos).filter { seen.insert($0.id).inserted }
     }
 
@@ -520,7 +554,7 @@ final class AppModel {
 
     /// Watched videos still on disk that Delete All Watched Videos would remove (bookmarks are kept).
     var watchedVideoCount: Int {
-        (libraries + longLibraries + vineLibraries).reduce(0) { $0 + $1.videos.count { isPlayed($0) && !isBookmarked($0) } }
+        (libraries + longLibraries + vineLibraries + suggestedLibraries).reduce(0) { $0 + $1.videos.count { isPlayed($0) && !isBookmarked($0) } }
     }
 
     /// Deletes the files of every watched video except bookmarked ones. Each creator's download archive still lists
@@ -528,7 +562,7 @@ final class AppModel {
     @discardableResult
     func deleteWatchedVideos() -> Int {
         var removed = 0
-        for video in (libraries + longLibraries + vineLibraries).flatMap(\.videos) where isPlayed(video) && !isBookmarked(video) {
+        for video in (libraries + longLibraries + vineLibraries + suggestedLibraries).flatMap(\.videos) where isPlayed(video) && !isBookmarked(video) {
             if (try? FileManager.default.removeItem(at: video.url)) != nil { removed += 1 }
             try? FileManager.default.removeItem(at: video.posterURL)
         }
@@ -565,7 +599,7 @@ final class AppModel {
     /// else someone keeps in there is left alone.
     func libraryFolders() -> [URL] {
         let names = Set(config.creators.flatMap { [$0.id, $0.longFormFolderName] })
-        let prefixes = ["youtube@", "youtube-long@", "youtube-playlist@", Vine.folderPrefix]
+        let prefixes = ["youtube@", "youtube-long@", "youtube-playlist@", Vine.folderPrefix, "suggested@", "suggested-"]
         let entries = (try? FileManager.default.contentsOfDirectory(at: settings.libraryURL, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
         return entries.filter { url in
             let name = url.lastPathComponent
@@ -580,7 +614,7 @@ final class AppModel {
     @discardableResult
     func deleteLibrary() -> Int? {
         guard !isDownloading else { return nil }
-        let count = (libraries + longLibraries + vineLibraries).reduce(0) { $0 + $1.videos.count }
+        let count = (libraries + longLibraries + vineLibraries + suggestedLibraries).reduce(0) { $0 + $1.videos.count }
         for folder in libraryFolders() { try? FileManager.default.trashItem(at: folder, resultingItemURL: nil) }
         reloadLibrary()
         return count
@@ -787,7 +821,10 @@ final class AppModel {
 
     // MARK: Downloads
 
-    func downloadAll() { download(config.creators, vine: settings.vineEnabled) }
+    func downloadAll() { download(config.creators, vine: settings.vineEnabled, suggested: settings.suggested.anyOn) }
+
+    /// Just the suggestions: watched ones cleared, then each platform with them on topped back up.
+    func downloadSuggested() { download([], forms: [], suggested: true) }
 
     /// Just the next batch of Vines.
     func downloadVine() { download([], forms: [], vine: true) }
@@ -810,9 +847,10 @@ final class AppModel {
 
     /// With `only` (from the long-video picker), just those long videos of each creator listed there.
     func download(_ creators: [Creator], forms: Set<VideoForm> = Set(VideoForm.allCases), vine: Bool = false,
-                  only: [String: Set<String>]? = nil, heights: [String: Int?] = [:]) {
+                  suggested: Bool = false, only: [String: Set<String>]? = nil, heights: [String: Int?] = [:]) {
         let vine = vine && settings.vineEnabled
-        guard !isDownloading, !creators.isEmpty || vine else { return }
+        let suggestedPlatforms = suggested ? Suggested.platforms.filter(settings.suggested.isOn) : []
+        guard !isDownloading, !creators.isEmpty || vine || !suggestedPlatforms.isEmpty else { return }
         let lock = DownloadLock()
         guard lock.tryAcquire() else {
             downloadMessage = "A scheduled download is already running. Try again when it finishes."
@@ -821,12 +859,15 @@ final class AppModel {
         isDownloading = true
         downloadingForms = creators.isEmpty ? [] : forms
         downloadingVine = vine
+        downloadingSuggested = !suggestedPlatforms.isEmpty
         downloadMessage = nil
         lastActivity = nil
-        downloadUnits = creators.count + (vine ? 1 : 0)
+        downloadUnits = creators.count + (vine ? 1 : 0) + suggestedPlatforms.count
         downloadUnitsDone = 0
         for c in creators { statuses[c.id] = .queued }
         if vine { statuses[Vine.feedID] = .queued }
+        for platform in suggestedPlatforms { statuses[Suggested.feedID(platform)] = .queued }
+        let followed = config.creators
         let runner = ProcessRunner()
         self.runner = runner
         let settings = config.settings
@@ -843,6 +884,18 @@ final class AppModel {
                 RunState.record(result, for: Vine.feedID)
                 total += result.newVideos
                 statuses[Vine.feedID] = .idle
+                downloadUnitsDone += 1
+                reloadLibrary()
+            }
+            for platform in suggestedPlatforms where !runner.isCancelled {
+                let feedID = Suggested.feedID(platform)
+                statuses[feedID] = .downloading
+                let began = Date()
+                let result = await Suggested.refresh(platform, settings: settings, followed: followed, runner: runner, log: log)
+                DownloadLog.result(feedID, result, seconds: Date().timeIntervalSince(began))
+                RunState.record(result, for: feedID)
+                total += result.newVideos
+                statuses[feedID] = .idle
                 downloadUnitsDone += 1
                 reloadLibrary()
             }
@@ -869,11 +922,14 @@ final class AppModel {
             }
             for c in creators { statuses[c.id] = .idle }
             statuses[Vine.feedID] = nil
+            for platform in suggestedPlatforms { statuses[Suggested.feedID(platform)] = nil }
             lock.release()
             self.runner = nil
             isDownloading = false
             downloadingForms = []
             downloadingVine = false
+            downloadingSuggested = false
+            finishPendingFollows()
             downloadMessage = runner.isCancelled ? "Stopped." : "Done — \(total) new video\(total == 1 ? "" : "s")."
             if only != nil {
                 // Minimized, the picker is done with; open, it shows how it went until it's closed.
@@ -1082,7 +1138,7 @@ final class AppModel {
         runner?.cancel()
     }
 
-    private func appendLog(_ line: String) {
+    func appendLog(_ line: String) {
         lastActivity = line
         let stamp = Date().formatted(date: .omitted, time: .standard)
         log.append("\(stamp)  \(line)")

@@ -35,12 +35,15 @@ data class Creator(
     val order: List<String> = emptyList(),
     /** A Vine author ("vine@<Vine user ID>"): short videos only, no category. */
     val vine: Boolean = false,
+    /** A creator from the Mac's suggested feeds ("suggested-tiktok@…", "suggested-youtube@…"), not followed yet. API 11. */
+    val suggested: Boolean = false,
     /** A channel with long videos on, whose older videos can be asked for. False from Macs before API 10. */
 ) {
+    val isSuggested: Boolean get() = suggested || isSuggestedKey(username)
     val isYouTube: Boolean get() = isYouTubeKey(username)
     val isVine: Boolean get() = vine || username.startsWith(VINE_KEY_PREFIX)
-    /** The @handle without the Mac's "youtube@" key prefix. */
-    val handle: String get() = username.removePrefix(YOUTUBE_KEY_PREFIX)
+    /** The @handle without the Mac's "youtube@" (or suggested) key prefix. */
+    val handle: String get() = creatorHandle(username)
     val displayName: String get() = nickname ?: "@$handle"
     /** Where it's from, for "Open in YouTube". */
     val siteName: String get() = if (isYouTube) "YouTube" else "TikTok"
@@ -49,7 +52,7 @@ data class Creator(
         get() = when {
             isVine -> null
             playlist -> username.removePrefix("youtube-playlist@").takeIf { it != "suggestions" }?.let { "https://www.youtube.com/playlist?list=$it" }
-            !isYouTube -> "https://www.tiktok.com/@$username"
+            !isYouTube -> "https://www.tiktok.com/@$handle"
             handle.startsWith("UC") -> "https://www.youtube.com/channel/$handle"
             else -> "https://www.youtube.com/@$handle"
         }
@@ -63,10 +66,20 @@ const val VINE_KEY_PREFIX = "vine@"
 /** Home's "Other Creators" and Vine cards, alongside the category ids. */
 const val OTHER_CARD = "other"
 const val VINE_CARD = "vine"
+/** The Suggested card (creators from the Mac's suggested feeds). */
+const val SUGGESTED_CARD = "suggested"
+const val SUGGESTED_TIKTOK_PREFIX = "suggested-tiktok@"
+const val SUGGESTED_YOUTUBE_PREFIX = "suggested-youtube@"
+fun isSuggestedKey(creatorKey: String) =
+    creatorKey.startsWith(SUGGESTED_TIKTOK_PREFIX) || creatorKey.startsWith(SUGGESTED_YOUTUBE_PREFIX)
+fun creatorHandle(creatorKey: String): String =
+    listOf(YOUTUBE_KEY_PREFIX, SUGGESTED_TIKTOK_PREFIX, SUGGESTED_YOUTUBE_PREFIX).firstOrNull { creatorKey.startsWith(it) }
+        ?.let { creatorKey.removePrefix(it) } ?: creatorKey
 /** Long videos' Playlists card, which is never in a mix, in the playback rules. */
 const val PLAYLIST_CARD = "playlists"
 /** YouTube channels, and YouTube playlists ("youtube-playlist@<ID>"). */
-fun isYouTubeKey(creatorKey: String) = creatorKey.startsWith(YOUTUBE_KEY_PREFIX) || creatorKey.startsWith("youtube-playlist@")
+fun isYouTubeKey(creatorKey: String) = creatorKey.startsWith(YOUTUBE_KEY_PREFIX) || creatorKey.startsWith("youtube-playlist@") ||
+    creatorKey.startsWith(SUGGESTED_YOUTUBE_PREFIX)
 
 data class Video(
     val id: String,
@@ -132,6 +145,7 @@ data class Manifest(
                         playlist = it.optBoolean("playlist"),
                         order = it.optJSONArray("order")?.let { a -> (0 until a.length()).map(a::getString) }.orEmpty(),
                         vine = it.optBoolean("vine"),
+                        suggested = it.optBoolean("suggested"),
                     )
                 },
                 videos = json.optJSONArray("videos").objects().map {
@@ -398,3 +412,16 @@ fun JSONArray?.objects(): List<JSONObject> =
     if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it) }
 
 private fun JSONObject.stringOrNull(key: String): String? = if (has(key) && !isNull(key)) getString(key) else null
+
+/** Adding a suggested creator to the Mac's creators, waiting for the next sync when the Mac couldn't be reached. */
+data class PendingFollow(val creator: String, val category: String?, val at: Instant) {
+    fun toJson(): JSONObject = JSONObject().put("creator", creator).put("category", category ?: JSONObject.NULL).put("at", at.toString())
+
+    companion object {
+        fun fromJson(json: JSONObject) = PendingFollow(
+            json.getString("creator"),
+            json.optString("category").takeIf { it.isNotEmpty() && it != "null" },
+            runCatching { Instant.parse(json.getString("at")) }.getOrDefault(Instant.EPOCH),
+        )
+    }
+}

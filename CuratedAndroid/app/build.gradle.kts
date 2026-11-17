@@ -14,8 +14,8 @@ android {
         minSdk = 29
         targetSdk = 36
         // Kept in step with the Mac app's VERSION and BUILD_NUMBER.
-        versionCode = 31
-        versionName = "2.2"
+        versionCode = 32
+        versionName = "2.3"
         manifestPlaceholders["appLabel"] = "Curated"
         // `-PautoTest` builds a copy that installs beside the real app with its own data, for testing on a real phone.
         if (project.hasProperty("autoTest")) {

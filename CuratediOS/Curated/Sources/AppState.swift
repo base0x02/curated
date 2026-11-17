@@ -16,6 +16,11 @@ final class AppState {
     private(set) var longLibraries: [CreatorLibrary] = []
     /// Vine authors with Vines on this device. Short videos, kept apart from `libraries` (no category, no Top list).
     private(set) var vineLibraries: [CreatorLibrary] = []
+    /// Creators from the Mac's suggested feeds with a video on this device (API 11). Short videos, kept apart from
+    /// `libraries` like Vines: a Suggested card, no category, no Top list.
+    private(set) var suggestedLibraries: [CreatorLibrary] = []
+    /// Suggested creators to add on the Mac, sent at the next sync when the Mac couldn't be reached.
+    private(set) var pendingFollows: [PendingFollow] = []
     /// Which Home is showing: short or long videos. Always short at launch, as on the Mac.
     var form = VideoForm.short {
         didSet { if form == .long && oldValue != .long { onSwitchedToLong?() } }
@@ -174,6 +179,7 @@ final class AppState {
         positionMarks = store.loadPositions()
         nowPlayingMark = store.loadNowPlaying()
         playbackRules = store.loadPlaybackRules()
+        pendingFollows = store.loadPendingFollows()
         rebuildLibraries()
     }
 
@@ -182,7 +188,7 @@ final class AppState {
 
     func category(_ id: String?) -> Category? { id.flatMap { id in categories.first { $0.id == id } } }
     func library(_ username: String, form: VideoForm = .short) -> CreatorLibrary? {
-        (form == .short ? libraries + vineLibraries : longLibraries).first { $0.id == username }
+        (form == .short ? libraries + vineLibraries + suggestedLibraries : longLibraries).first { $0.id == username }
     }
 
     /// Long-video creators and playlists, or only those in `category`.
@@ -206,7 +212,9 @@ final class AppState {
     /// cards turned off in Settings.
     func automixLibraries(in category: String?) -> [CreatorLibrary] {
         let off = category == nil ? playbackRules.short.automixOff : []
-        let mix = libraries(in: category).filter { !off.contains(cardKey($0.creator)) }
+        var mix = libraries(in: category).filter { !off.contains(cardKey($0.creator)) }
+        // Suggestions take one creator's share of the main Automix, as on the Mac.
+        if category == nil, !suggestedLibraries.isEmpty, !off.contains(suggestedCard) { mix.append(allSuggested) }
         guard !vineLibraries.isEmpty, !off.contains(vineCard), category.map({ manifest?.vineCategories?.contains($0) == true }) ?? true else { return mix }
         return mix + [allVines]
     }
@@ -220,6 +228,7 @@ final class AppState {
     /// Home's card a creator is under, as named in a mix's `picked` and the playback rules.
     func cardKey(_ creator: Creator) -> String {
         if creator.username.hasPrefix(vineKeyPrefix) { return vineCard }
+        if creator.isSuggested { return suggestedCard }
         if creator.isPlaylist { return playlistCard }
         return category(creator.category)?.id ?? otherCard
     }
@@ -273,7 +282,10 @@ final class AppState {
 
     /// Automix for a pick of Home's cards: Vines only when their card is picked.
     func automixLibraries(picked: Set<String>) -> [CreatorLibrary] {
-        let mix = mixLibraries(picked: picked, form: .short)
+        // The Suggested card's own Automix: each suggested creator as a creator.
+        if picked == [suggestedCard] { return suggestedLibraries }
+        var mix = mixLibraries(picked: picked, form: .short)
+        if !suggestedLibraries.isEmpty, picked.contains(suggestedCard) { mix.append(allSuggested) }
         guard !vineLibraries.isEmpty, picked.contains(vineCard) else { return mix }
         return mix + [allVines]
     }
@@ -283,6 +295,13 @@ final class AppState {
         let all = Creator(username: vineKeyPrefix + "classics", nickname: "Vine", days: 1, category: nil, hasAvatar: false,
                           vine: true)
         return CreatorLibrary(creator: all, videos: vineLibraries.flatMap(\.videos).shuffled())
+    }
+
+    /// Every suggestion as one creator, newest first.
+    private var allSuggested: CreatorLibrary {
+        let all = Creator(username: suggestedTikTokPrefix + "all", nickname: "Suggested", days: 1, category: nil,
+                          hasAvatar: false, suggested: true)
+        return CreatorLibrary(creator: all, videos: suggestedLibraries.flatMap(\.videos).sorted { $0.date > $1.date })
     }
 
     /// For the long "Other Creators" card. Playlists have their own card.
@@ -295,7 +314,7 @@ final class AppState {
     /// A form's videos on the device, once each (a long video can be both a creator's and in a playlist).
     func videos(_ form: VideoForm) -> [Video] {
         var seen: Set<String> = []
-        let vines = form == .short ? vineLibraries : []
+        let vines = form == .short ? vineLibraries + suggestedLibraries : []
         return (libraries(in: nil, form: form) + vines).flatMap(\.videos).filter { seen.insert($0.id).inserted }
     }
 
@@ -529,6 +548,7 @@ final class AppState {
             libraries = []
             longLibraries = []
             vineLibraries = []
+            suggestedLibraries = []
             return
         }
         let downloaded = manifest.videos.filter { store.isDownloaded($0) }
@@ -537,7 +557,7 @@ final class AppState {
         let sentLong = Set(manifest.videos.filter(\.isLong).map(\.creator))
         let sentShort = Set(manifest.videos.filter { !$0.isLong }.map(\.creator))
         libraries = manifest.creators
-            .filter { !$0.isPlaylist && !$0.isVine && (sentShort.contains($0.username) || !sentLong.contains($0.username)) }
+            .filter { !$0.isPlaylist && !$0.isVine && !$0.isSuggested && (sentShort.contains($0.username) || !sentLong.contains($0.username)) }
             .map { CreatorLibrary(creator: $0, videos: (short[$0.username] ?? []).sorted { $0.date > $1.date }) }
         longLibraries = manifest.creators
             .filter { $0.isPlaylist || sentLong.contains($0.username) }
@@ -556,6 +576,53 @@ final class AppState {
         vineLibraries = manifest.creators.filter(\.isVine)
             .map { CreatorLibrary(creator: $0, videos: (short[$0.username] ?? []).sorted { $0.date > $1.date }) }
             .filter { !$0.videos.isEmpty }
+        suggestedLibraries = manifest.creators.filter(\.isSuggested)
+            .map { CreatorLibrary(creator: $0, videos: (short[$0.username] ?? []).sorted { $0.date > $1.date }) }
+            .filter { !$0.videos.isEmpty }
+            .sorted { $0.creator.displayName.localizedStandardCompare($1.creator.displayName) == .orderedAscending }
+    }
+
+    // MARK: Suggested creators
+
+    /// Whether adding this suggested creator is waiting for the next sync.
+    func isFollowPending(_ creatorKey: String) -> Bool { pendingFollows.contains { $0.creator == creatorKey } }
+
+    /// Adds a suggested creator to the Mac's creators in `category`. When the Mac can't be reached, it waits for the
+    /// next sync. Returns what to tell the user.
+    func followSuggested(_ creatorKey: String, category: String?) async -> String {
+        let name = library(creatorKey)?.creator.displayName ?? "@\(creatorHandle(creatorKey))"
+        if let client = await macClient() {
+            do {
+                let reply = try await client.followSuggested(creatorKey, category: category)
+                if reply.ok { syncInBackground() }
+                return reply.message
+            } catch let error as SyncError where error.status == 404 {
+                return "Your Mac needs updating to add suggested creators."
+            } catch {
+                // Couldn't finish: try again at the next sync.
+            }
+        }
+        pendingFollows.removeAll { $0.creator == creatorKey }
+        pendingFollows.append(PendingFollow(creator: creatorKey, category: category, at: Date()))
+        store.savePendingFollows(pendingFollows)
+        return "Your Mac isn't reachable right now. \(name) will be added at the next sync."
+    }
+
+    /// Sends the follows that waited for the Mac. Ones it refused are dropped; ones that couldn't be sent wait again.
+    private func sendPendingFollows(_ client: SyncClient) async {
+        guard !pendingFollows.isEmpty else { return }
+        var left: [PendingFollow] = []
+        for follow in pendingFollows {
+            do {
+                _ = try await client.followSuggested(follow.creator, category: follow.category)
+            } catch let error as SyncError where error.status == 404 {
+                continue
+            } catch {
+                left.append(follow)
+            }
+        }
+        pendingFollows = left
+        store.savePendingFollows(left)
     }
 
     // MARK: Pairing
@@ -595,6 +662,8 @@ final class AppState {
         store.savePlayed([:])
         store.saveWatchLater([:])
         store.saveBookmarks([:])
+        pendingFollows = []
+        try? FileManager.default.removeItem(at: store.pendingFollowsFile)
         collapsedCards = []
         lastSyncMessage = nil
         lastSyncAt = nil
@@ -780,9 +849,12 @@ final class AppState {
 
         lap("find Mac (\(client.host))")
 
+        // Suggested creators added while the Mac was out of reach: before the list, so it already has them moved.
+        await sendPendingFollows(client)
+
         syncStep = "Checking for new videos…"
-        // Vines come with the short videos: listed every time, downloaded when short videos are.
-        let manifestData = try await client.manifest(forms: .all, vine: true)
+        // Vines and suggestions come with the short videos: listed every time, downloaded when short videos are.
+        let manifestData = try await client.manifest(forms: .all, vine: true, suggested: true)
         lap("video list request (\(manifestData.count / 1024) KB)")
         let newManifest = try Manifest.decode(manifestData)
         lap("video list decode (\(newManifest.videos.count) videos)")

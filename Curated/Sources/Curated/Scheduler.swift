@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// The scheduled download is a per-user LaunchAgent that runs this executable with --scheduled-download at each of
@@ -78,7 +79,12 @@ enum HeadlessRunner {
         defer { lock.release() }
 
         let config = Config.load()
-        let semaphore = DispatchSemaphore(value: 0)
+        // The TikTok For You feed is read by a hidden web view (TikTokFeedReader), which needs an app and its main
+        // run loop; no Dock icon or menu bar.
+        if config.settings.suggested.tiktok {
+            NSApplication.shared.setActivationPolicy(.prohibited)
+        }
+        let finished = Finished()
         Task.detached {
             print("\(Date()) Scheduled download for \(config.creators.count) creator(s)")
             DownloadLog.beginRun("Scheduled download", settings: config.settings)
@@ -90,6 +96,13 @@ enum HeadlessRunner {
                 DownloadLog.result(Vine.feedID, result, seconds: Date().timeIntervalSince(began))
                 RunState.record(result, for: Vine.feedID)
             }
+            for platform in Suggested.platforms where config.settings.suggested.isOn(platform) {
+                let began = Date()
+                let result = await Suggested.refresh(platform, settings: config.settings, followed: config.creators,
+                                                     runner: ProcessRunner(), log: log)
+                DownloadLog.result(Suggested.feedID(platform), result, seconds: Date().timeIntervalSince(began))
+                RunState.record(result, for: Suggested.feedID(platform))
+            }
             await DownloadEngine.downloadAll(config.creators, settings: config.settings, runner: ProcessRunner(), log: log)
             let now = Date()
             RunState.update { state in
@@ -98,9 +111,19 @@ enum HeadlessRunner {
                 if config.creators.contains(where: \.downloadsLongForm) { state.lastLongRun = now }
             }
             print("\(Date()) Finished")
-            semaphore.signal()
+            finished.set()
         }
-        semaphore.wait()
+        // Turn the main run loop (rather than block on a semaphore) so work sent to the main actor runs.
+        while !finished.value {
+            _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.5))
+        }
         return 0
+    }
+
+    private final class Finished: @unchecked Sendable {
+        private let lock = NSLock()
+        private var done = false
+        var value: Bool { lock.withLock { done } }
+        func set() { lock.withLock { done = true } }
     }
 }

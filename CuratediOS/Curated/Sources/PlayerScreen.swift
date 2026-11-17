@@ -550,6 +550,7 @@ struct PlayerScreen: View {
                          ?? "@\(creatorHandle(video.creator))").font(.headline)
                     Text(playback.positionLabel(video, mode: mode)).font(.caption).foregroundStyle(.white.opacity(0.7))
                 }
+                SuggestedFollowButton(creatorKey: video.creator)
                 Spacer(minLength: 0)
                 if let views = video.viewCount {
                     VStack(spacing: 2) {

@@ -45,8 +45,9 @@ struct SyncClient {
 
     /// Short videos only unless `forms` asks for long ones too, and the Vines with `vine` (a Mac from before long
     /// videos or Vines ignores what it doesn't know).
-    func manifest(forms: SyncForms = .short, vine: Bool = false) async throws -> Data {
-        let query = [forms == .short ? nil : "forms=\(forms.query)", vine ? "vine=1" : nil].compactMap { $0 }
+    func manifest(forms: SyncForms = .short, vine: Bool = false, suggested: Bool = false) async throws -> Data {
+        let query = [forms == .short ? nil : "forms=\(forms.query)", vine ? "vine=1" : nil,
+                     suggested ? "suggested=1" : nil].compactMap { $0 }
         return try await request("GET", "/manifest" + (query.isEmpty ? "" : "?" + query.joined(separator: "&")))
     }
 
@@ -107,6 +108,19 @@ struct SyncClient {
         }
         let body = try JSONEncoder().encode(Body(formVersion: formVersion, values: values))
         return try JSONDecoder().decode(AddCreatorReply.self, from: try await request("POST", "/creators", body: body))
+    }
+
+    struct FollowReply: Decodable {
+        let ok: Bool
+        let message: String
+        let creatorID: String?
+    }
+
+    /// API 11: adds a suggested creator to the Mac's creators, in a category.
+    func followSuggested(_ creator: String, category: String?) async throws -> FollowReply {
+        struct Body: Encodable { let creator: String; let category: String? }
+        let body = try JSONEncoder().encode(Body(creator: creator, category: category))
+        return try JSONDecoder().decode(FollowReply.self, from: try await request("POST", "/suggested/follow", body: body))
     }
 
     /// Follows the Mac's listing of a creator's older videos. Returns when it's done; cancelling the task stops it.
