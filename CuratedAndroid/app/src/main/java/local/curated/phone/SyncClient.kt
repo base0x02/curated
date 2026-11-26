@@ -82,7 +82,10 @@ class SyncClient(val host: String, val port: Int, private val token: String? = n
     }
 
     /** The add-creator form. A Mac older than API 10 answers 404. */
-    fun creatorForm(): CreatorForm = CreatorForm.fromJson(JSONObject(request("GET", "/creators/form")))
+    fun creatorForm(): CreatorForm = CreatorForm.fromJson(JSONObject(creatorFormText()))
+
+    /** The form as the Mac sent it, to keep for adding creators while the Mac is out of reach. */
+    fun creatorFormText(): String = request("GET", "/creators/form")
 
     fun addCreator(formVersion: Int, values: Map<String, String>): JSONObject =
         JSONObject(request("POST", "/creators", JSONObject().put("formVersion", formVersion).put("values", JSONObject(values))))

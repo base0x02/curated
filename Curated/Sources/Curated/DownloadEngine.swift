@@ -287,6 +287,12 @@ enum DownloadEngine {
                             onVideo: ((String, PendingVideo.State) -> Void)? = nil,
                             onStart: @escaping (Creator) async -> Void = { _ in },
                             onFinish: @escaping (Creator, DownloadResult) async -> Void = { _, _ in }) async {
+        // Snoozed creators wait it out, unless videos were picked from them by hand.
+        let snoozed = creators.filter { $0.isSnoozed && only?[$0.id] == nil }
+        if !snoozed.isEmpty {
+            DownloadLog.info("Snoozed, not downloading: " + snoozed.map(\.id).joined(separator: ", "))
+        }
+        let creators = creators.filter { !$0.isSnoozed || only?[$0.id] != nil }
         var pending = prioritized(creators, state: RunState.load())[...]
         let started = Date()
         let formNames = forms.map(\.rawValue).sorted().joined(separator: "+")
@@ -392,8 +398,10 @@ enum DownloadEngine {
         let archived = Set(((try? String(contentsOf: archive, encoding: .utf8)) ?? "")
             .split(separator: "\n").compactMap { $0.split(separator: " ").last.map(String.init) })
 
+        // See Less: the day window only, never historical videos, whatever the keep rule.
+        let seeingLess = creator.seeLess && !creator.playlist && only == nil
         // Kept by count: only as many as it takes to get back to `keepVideos` unwatched.
-        let counting = form == .short && creator.keepsByCount
+        let counting = form == .short && creator.keepsByCount && !seeingLess
         let played: Set<String> = counting ? Set(PlayedStore.load().filter(\.value.played).keys) : []
         var needed = 0
         if counting, let keep = creator.keepVideos {
@@ -487,6 +495,20 @@ enum DownloadEngine {
         if counting {
             toFetch = pickForCount(toFetch, dates: listing.dates, newest: newest,
                                    historical: creator.keepHistorical, needed: needed)
+        }
+        if seeingLess {
+            // One video per window: the most-viewed one, and only while none from the window is downloaded yet.
+            let inWindow = listing.recentIDs.filter { (listing.dates[$0] ?? .infinity) >= cutoff }
+            if inWindow.contains(where: archived.contains) {
+                if !toFetch.isEmpty { log("\(name): See Less, already has its video from the last \(creator.days) day(s)") }
+                toFetch = []
+            } else if let best = toFetch.filter({ inWindow.contains($0) })
+                .max(by: { (listing.viewCounts[$0] ?? 0) < (listing.viewCounts[$1] ?? 0) }) {
+                if toFetch.count > 1 { log("\(name): See Less, the most viewed of \(toFetch.count), skipping the rest") }
+                toFetch = [best]
+            } else {
+                toFetch = []
+            }
         }
         log("\(name): \(listing.recentIDs.count) \(creator.playlist ? "in the playlist" : counting ? "listed" : "recent")"
             + (candidates.count < listing.recentIDs.count ? ", newest \(candidates.count)" : "")

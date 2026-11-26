@@ -89,19 +89,76 @@ private func macMessage(_ error: Error) -> String {
     return error.localizedDescription
 }
 
+extension CreatorForm {
+    private static let link = #"(youtube\.com|youtu\.be|tiktok\.com)/"#
+    private static let youTubeLink = #"(youtube\.com|youtu\.be)/"#
+    private static let playlist = #"(youtube\.com|youtu\.be)/.*[?&]list=[A-Za-z0-9_-]{10,}"#
+
+    /// For a phone that's never fetched the form: the fields every Mac with Add Creator (API 10) understands, as it
+    /// describes them, with the categories from the last sync.
+    static func offline(categories: [Category]) -> CreatorForm {
+        let notPlaylist = Condition(field: "input", matches: playlist, negate: true)
+        let youTubeChannel = [[Condition(field: "platform", equals: ["youtube"]), Condition(field: "input", matches: link, negate: true), notPlaylist],
+                              [Condition(field: "input", matches: youTubeLink), notPlaylist]]
+        let byCount = Condition(field: "keepMode", equals: ["videos"])
+        var fields: [Field] = [
+            Field(key: "input", type: "text", label: "Creator", detail: "A username, or a TikTok, YouTube channel or YouTube playlist link.",
+                  placeholder: "@username or a link", required: true),
+            Field(key: "platform", type: "choice", label: "Platform",
+                  choices: [Choice(value: "tiktok", label: "TikTok"), Choice(value: "youtube", label: "YouTube")],
+                  defaultValue: "tiktok", showIf: [[Condition(field: "input", matches: link, negate: true)]]),
+            Field(key: "shorts", type: "toggle", label: "Shorts", defaultValue: "true", showIf: youTubeChannel),
+            Field(key: "longForm", type: "toggle", label: "Long Videos", defaultValue: "false", showIf: youTubeChannel),
+            Field(key: "keepMode", type: "choice", label: "Keep",
+                  choices: [Choice(value: "days", label: "Videos from the Last Few Days"), Choice(value: "videos", label: "The Newest Unwatched")],
+                  defaultValue: "days", showIf: [[notPlaylist]]),
+            Field(key: "days", type: "number", label: "Days", min: 1, max: 365, defaultValue: "3",
+                  showIf: [[Condition(field: "keepMode", equals: ["videos"], negate: true), notPlaylist]]
+                      + youTubeChannel.map { $0 + [Condition(field: "longForm", equals: ["true"])] }),
+            Field(key: "keepVideos", type: "number", label: "Unwatched Videos", min: 1, max: 100, defaultValue: "5",
+                  showIf: [[byCount, notPlaylist]]),
+            Field(key: "keepHistorical", type: "toggle", label: "Historical",
+                  detail: "When there aren't enough new videos, also download older ones not yet downloaded.",
+                  defaultValue: "false", showIf: [[byCount, notPlaylist]]),
+        ]
+        if !categories.isEmpty {
+            fields.append(Field(key: "category", type: "choice", label: "Category",
+                                choices: [Choice(value: "", label: "None")] + categories.map { Choice(value: $0.id, label: $0.name) },
+                                defaultValue: "", showIf: [[notPlaylist]]))
+        }
+        return CreatorForm(version: 1, fields: fields)
+    }
+
+    /// Whether the Keep fields are the Mac's (`keepMode` days or videos, with `days` and `keepVideos`), so they can be
+    /// drawn as its Keep choice: videos from the last N days, or the newest N unwatched.
+    var hasKeepChoice: Bool {
+        let keys = Set(fields.map(\.key))
+        return keys.isSuperset(of: ["keepMode", "days", "keepVideos"])
+            && Set(fields.first { $0.key == "keepMode" }?.choices?.map(\.value) ?? []) == ["days", "videos"]
+    }
+
+    static let keepKeys: Set<String> = ["keepMode", "days", "keepVideos", "keepHistorical"]
+}
+
 /// A form drawn from what the Mac sent. Only the fields showing are sent back, and the Mac has the last word on them.
+/// While the Mac can't be reached it uses the last form the Mac sent, and the creator is added at the next sync.
 struct AddCreatorView: View {
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
     @State private var form: CreatorForm?
+    /// The form came from the Mac just now, so adding goes straight to it.
+    @State private var online = false
+    @State private var connecting = true
     @State private var values: [String: String] = [:]
     @State private var loadError: String?
     @State private var sending = false
     @State private var message: String?
     @State private var fieldErrors: [String: String] = [:]
     @State private var added: String?
+    @State private var queued: String?
 
     private var shown: [CreatorForm.Field] { (form?.fields ?? []).filter { $0.isKnownType && $0.isShown(values) } }
+    private var drawsKeep: Bool { form?.hasKeepChoice == true }
 
     private var canSend: Bool {
         !sending && form != nil && shown.allSatisfy {
@@ -122,15 +179,35 @@ struct AddCreatorView: View {
                             Section { Text(message).foregroundStyle(.red) }
                                 .accessibilityIdentifier("addCreatorMessage")
                         }
-                        ForEach(shown) { field in
+                        if !online && !connecting {
                             Section {
-                                control(field)
-                            } footer: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    if let problem = fieldErrors[field.key] {
-                                        Text(problem).foregroundStyle(.red).accessibilityIdentifier("error-\(field.key)")
+                                Label("Your Mac isn't reachable. The creator will be added at the next sync.", systemImage: "clock.arrow.circlepath")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .accessibilityIdentifier("addCreatorOffline")
+                        }
+                        ForEach(shown) { field in
+                            if drawsKeep && CreatorForm.keepKeys.contains(field.key) {
+                                if field.key == "keepMode" { keepSection }
+                            } else {
+                                Section {
+                                    control(field)
+                                } footer: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        if let problem = fieldErrors[field.key] {
+                                            Text(problem).foregroundStyle(.red).accessibilityIdentifier("error-\(field.key)")
+                                        }
+                                        if let detail = field.detail { Text(detail) }
                                     }
-                                    if let detail = field.detail { Text(detail) }
+                                }
+                            }
+                        }
+                        if !app.waitingCreators.isEmpty {
+                            Section("Waiting for the Next Sync") {
+                                ForEach(app.waitingCreators) { creator in
+                                    Text(creator.name)
+                                        .swipeActions { Button("Cancel", role: .destructive) { app.cancelPendingCreator(creator.id) } }
+                                        .contextMenu { Button("Don't Add", systemImage: "xmark", role: .destructive) { app.cancelPendingCreator(creator.id) } }
                                 }
                             }
                         }
@@ -158,14 +235,113 @@ struct AddCreatorView: View {
         } message: {
             Text(added ?? "")
         }
+        .alert("Added at the Next Sync", isPresented: Binding(get: { queued != nil }, set: { if !$0 { queued = nil } })) {
+            Button("OK") { dismiss() }
+        } message: {
+            Text(queued ?? "")
+        }
     }
 
+    // MARK: Keep
+
+    private func number(_ key: String, _ fallback: Int, _ range: ClosedRange<Int>) -> Binding<Int> {
+        Binding(get: {
+            let field = form?.fields.first { $0.key == key }
+            let value = Int(values[key] ?? "") ?? Int(field?.defaultValue ?? "") ?? fallback
+            return min(max(value, range.lowerBound), range.upperBound)
+        }, set: { set(key, "\($0)") })
+    }
+
+    private func set(_ key: String, _ value: String) {
+        values[key] = value
+        fieldErrors[key] = nil
+        message = nil
+    }
+
+    private func isShown(_ key: String) -> Bool { shown.contains { $0.key == key } }
+
+    /// Keeping by count is for short videos: not for a YouTube channel with Shorts off.
+    private var shortsOff: Bool { isShown("shorts") && values["shorts"] == "false" }
+    private var byCount: Bool { values["keepMode"] == "videos" && !shortsOff }
+
+    private var keepFootnote: String? {
+        if shortsOff { return "Keeping a number of videos is for short videos. Long videos are kept until you watch or delete them." }
+        if byCount { return nil }
+        return values["longForm"] == "true" && isShown("longForm")
+            ? "How far back to look for new videos. Long videos are kept until you watch or delete them."
+            : "How far back to look for new videos."
+    }
+
+    private static func days(_ n: Int) -> String { "\(n) day\(n == 1 ? "" : "s")" }
+
+    /// As the Keep popover in Creators & Downloads on the Mac: videos from the last N days, or the newest N unwatched
+    /// (with Historical for older ones). Changing a number picks its choice.
+    @ViewBuilder private var keepSection: some View {
+        let days = number("days", 3, 1...365)
+        let count = number("keepVideos", 5, 1...100)
+        Section {
+            keepChoice(selected: !byCount, select: { set("keepMode", "days") }) {
+                Stepper(value: Binding(get: { days.wrappedValue }, set: { days.wrappedValue = $0; set("keepMode", "days") }), in: 1...365) {
+                    Text("Videos from the last ") + Text(Self.days(days.wrappedValue)).bold()
+                }
+            }
+            .accessibilityIdentifier("keepDays")
+            keepChoice(selected: byCount, select: { set("keepMode", "videos") }) {
+                Stepper(value: Binding(get: { count.wrappedValue }, set: { count.wrappedValue = $0; set("keepMode", "videos") }), in: 1...100) {
+                    Text("The newest ") + Text("\(count.wrappedValue) unwatched").bold()
+                }
+            }
+            .disabled(shortsOff)
+            .accessibilityIdentifier("keepVideos")
+            if byCount && isShown("keepHistorical") {
+                Toggle(isOn: Binding(get: { values["keepHistorical"] == "true" }, set: { set("keepHistorical", $0 ? "true" : "false") })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Historical")
+                        Text("When there aren't enough new videos, also download older ones not yet downloaded.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.leading, 34)
+                .accessibilityIdentifier("field-keepHistorical")
+            }
+            if byCount && isShown("days") {
+                Stepper(value: days, in: 1...365) {
+                    Text("Long videos from the last ") + Text(Self.days(days.wrappedValue)).bold()
+                }
+            }
+        } header: {
+            Text("Keep")
+        } footer: {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(CreatorForm.keepKeys.sorted(), id: \.self) { key in
+                    if let problem = fieldErrors[key] { Text(problem).foregroundStyle(.red).accessibilityIdentifier("error-\(key)") }
+                }
+                if let keepFootnote { Text(keepFootnote) }
+            }
+        }
+    }
+
+    /// A radio button with its row.
+    private func keepChoice(selected: Bool, select: @escaping () -> Void, @ViewBuilder content: () -> some View) -> some View {
+        HStack(spacing: 10) {
+            Button(action: select) {
+                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(selected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
+                    .frame(width: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            content()
+        }
+    }
+
+    // MARK: Fields
+
     @ViewBuilder private func control(_ field: CreatorForm.Field) -> some View {
-        let value = Binding(get: { values[field.key] ?? field.defaultValue ?? "" }, set: {
-            values[field.key] = $0
-            fieldErrors[field.key] = nil
-            message = nil
-        })
+        let value = Binding(get: { values[field.key] ?? field.defaultValue ?? "" }, set: { set(field.key, $0) })
         switch field.type {
         case "toggle":
             Toggle(field.label, isOn: Binding(get: { value.wrappedValue == "true" }, set: { value.wrappedValue = $0 ? "true" : "false" }))
@@ -192,23 +368,48 @@ struct AddCreatorView: View {
         }
     }
 
+    private func use(_ form: CreatorForm) {
+        // What's been typed stays, if the form was fetched again.
+        var values = self.values
+        for field in form.fields where values[field.key] == nil { values[field.key] = field.defaultValue ?? "" }
+        self.values = values
+        self.form = form
+    }
+
+    /// The saved form at once, then the Mac's own if it can be reached.
     private func load() async {
+        if form == nil { use(app.savedCreatorForm()) }
+        connecting = true
+        defer { connecting = false }
+        guard let client = await app.macClient() else {
+            online = false
+            return
+        }
         do {
-            guard let client = await app.macClient() else { throw SyncError(message: "Couldn't reach your Mac. Make sure Curated is open there with phone sync on.") }
-            let form = try await client.creatorForm()
-            if form.fields.contains(where: { $0.required == true && !$0.isKnownType }) {
+            let data = try await client.creatorFormData()
+            let fresh = try JSONDecoder().decode(CreatorForm.self, from: data)
+            if fresh.fields.contains(where: { $0.required == true && !$0.isKnownType }) {
                 loadError = "Update Curated on this \(UIDevice.current.localizedModel) to add creators from here."
                 return
             }
-            // What's been typed stays, if the form was fetched again.
-            var values = self.values
-            for field in form.fields where values[field.key] == nil { values[field.key] = field.defaultValue ?? "" }
-            self.values = values
-            self.form = form
+            app.saveCreatorForm(data)
+            use(fresh)
+            online = true
             loadError = nil
-        } catch {
+        } catch let error as SyncError where error.status != 0 {
             loadError = macMessage(error)
+        } catch {
+            online = false  // Lost on the way: add it at the next sync.
         }
+    }
+
+    /// The values to send: the fields showing. Keeping by count doesn't apply to a channel with Shorts off.
+    private var sentValues: [String: String] {
+        var sent: [String: String] = [:]
+        for field in shown { sent[field.key] = values[field.key] ?? field.defaultValue ?? "" }
+        if shortsOff, sent["keepMode"] != nil { sent["keepMode"] = "days" }
+        sent["input"] = sent["input"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return sent
     }
 
     private func send() async {
@@ -217,21 +418,42 @@ struct AddCreatorView: View {
         defer { sending = false }
         message = nil
         fieldErrors = [:]
-        var sent: [String: String] = [:]
-        for field in shown { sent[field.key] = values[field.key] ?? field.defaultValue ?? "" }
+        let sent = sentValues
+        guard online, let client = await app.macClient() else {
+            queued = app.queueCreator(formVersion: form.version, values: sent)
+            return
+        }
         do {
-            guard let client = await app.macClient() else { throw SyncError(message: "Couldn't reach your Mac. Make sure Curated is open there with phone sync on.") }
             let reply = try await client.addCreator(formVersion: form.version, values: sent)
             if reply.added {
                 added = reply.message
                 return
             }
             fieldErrors = reply.fieldErrors ?? [:]
-            // Beside the field where there is one.
-            if fieldErrors.isEmpty || fieldErrors.keys.contains(where: { key in !shown.contains { $0.key == key } }) { message = reply.message }
+            // Beside the field where there is one (the Keep fields share one place).
+            let placed = Set(shown.map(\.key))
+            if fieldErrors.isEmpty || fieldErrors.keys.contains(where: { !placed.contains($0) }) { message = reply.message }
             if reply.formChanged == true { await load() }
-        } catch {
+        } catch let error as SyncError where error.status != 0 {
             message = macMessage(error)
+        } catch {
+            // The Mac went away mid-request.
+            online = false
+            queued = app.queueCreator(formVersion: form.version, values: sent)
+        }
+    }
+}
+
+extension View {
+    /// Says why the Mac couldn't add a creator that was waiting for a sync.
+    func creatorFailureAlert(_ app: AppState, when active: Bool = true) -> some View {
+        let failure = active ? app.creatorFailure : nil
+        return alert("Couldn't Add \(failure?.name ?? "Creator")",
+                     isPresented: Binding(get: { failure != nil }, set: { if !$0, let failure { app.dismissCreatorFailure(failure.id) } }),
+                     presenting: failure) { failure in
+            Button("OK") { app.dismissCreatorFailure(failure.id) }
+        } message: { failure in
+            Text("Your Mac couldn't add \(failure.name), which was waiting for this sync.\n\n\(failure.error ?? "")\n\nTry adding it on your Mac.")
         }
     }
 }

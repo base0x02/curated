@@ -106,7 +106,57 @@ data class CreatorForm(val version: Int, val fields: List<Field>) {
         fun isShown(values: Map<String, String>): Boolean = showIf?.any { group -> group.all { it.holds(values) } } ?: true
     }
 
+    /**
+     * Whether the Keep fields are the Mac's (`keepMode` days or videos, with `days` and `keepVideos`), so they can be drawn
+     * as its Keep choice: videos from the last N days, or the newest N unwatched.
+     */
+    val hasKeepChoice: Boolean
+        get() = fields.map { it.key }.containsAll(listOf("keepMode", "days", "keepVideos")) &&
+            fields.first { it.key == "keepMode" }.choices.map { it.value }.toSet() == setOf("days", "videos")
+
     companion object {
+        val KEEP_KEYS = setOf("keepMode", "days", "keepVideos", "keepHistorical")
+        private const val LINK = """(youtube\.com|youtu\.be|tiktok\.com)/"""
+        private const val YOUTUBE_LINK = """(youtube\.com|youtu\.be)/"""
+        private const val PLAYLIST = """(youtube\.com|youtu\.be)/.*[?&]list=[A-Za-z0-9_-]{10,}"""
+
+        /**
+         * For a phone that's never fetched the form: the fields every Mac with Add Creator (API 10) understands, as it
+         * describes them, with the categories from the last sync.
+         */
+        fun offline(categories: List<Category>): CreatorForm {
+            fun c(field: String, equals: List<String>? = null, matches: String? = null, negate: Boolean = false) =
+                Condition(field, equals, matches, negate)
+            val notPlaylist = c("input", matches = PLAYLIST, negate = true)
+            val youTubeChannel = listOf(
+                listOf(c("platform", listOf("youtube")), c("input", matches = LINK, negate = true), notPlaylist),
+                listOf(c("input", matches = YOUTUBE_LINK), notPlaylist),
+            )
+            val byCount = c("keepMode", listOf("videos"))
+            val fields = mutableListOf(
+                Field("input", "text", "Creator", "A username, or a TikTok, YouTube channel or YouTube playlist link.",
+                    "@username or a link", true, emptyList(), "", null),
+                Field("platform", "choice", "Platform", null, null, false,
+                    listOf(Choice("tiktok", "TikTok"), Choice("youtube", "YouTube")), "tiktok", listOf(listOf(c("input", matches = LINK, negate = true)))),
+                Field("shorts", "toggle", "Shorts", null, null, false, emptyList(), "true", youTubeChannel),
+                Field("longForm", "toggle", "Long Videos", null, null, false, emptyList(), "false", youTubeChannel),
+                Field("keepMode", "choice", "Keep", null, null, false,
+                    listOf(Choice("days", "Videos from the Last Few Days"), Choice("videos", "The Newest Unwatched")), "days", listOf(listOf(notPlaylist))),
+                Field("days", "number", "Days", null, null, false, emptyList(), "3",
+                    listOf(listOf(c("keepMode", listOf("videos"), negate = true), notPlaylist)) +
+                        youTubeChannel.map { it + c("longForm", listOf("true")) }),
+                Field("keepVideos", "number", "Unwatched Videos", null, null, false, emptyList(), "5", listOf(listOf(byCount, notPlaylist))),
+                Field("keepHistorical", "toggle", "Historical",
+                    "When there aren't enough new videos, also download older ones not yet downloaded.", null, false, emptyList(), "false",
+                    listOf(listOf(byCount, notPlaylist))),
+            )
+            if (categories.isNotEmpty()) {
+                fields += Field("category", "choice", "Category", null, null, false,
+                    listOf(Choice("", "None")) + categories.map { Choice(it.id, it.name) }, "", listOf(listOf(notPlaylist)))
+            }
+            return CreatorForm(1, fields)
+        }
+
         fun fromJson(json: JSONObject) = CreatorForm(
             json.getInt("version"),
             json.getJSONArray("fields").objects().map { field ->
@@ -141,41 +191,76 @@ private fun macMessage(e: Exception): String =
 
 private const val UNREACHABLE = "Couldn't reach your Mac. Make sure Curated is open there with phone sync on."
 
-/** A form drawn from what the Mac sent. Only the fields showing are sent back, and the Mac has the last word on them. */
+/**
+ * A form drawn from what the Mac sent. Only the fields showing are sent back, and the Mac has the last word on them. While
+ * the Mac can't be reached it uses the last form the Mac sent, and the creator is added at the next sync.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddCreatorScreen(onBack: () -> Unit) {
     val state = LocalContext.current.curated.state
     val scope = rememberCoroutineScope()
     var form by remember { mutableStateOf<CreatorForm?>(null) }
+    /** The form came from the Mac just now, so adding goes straight to it. */
+    var online by remember { mutableStateOf(false) }
+    var connecting by remember { mutableStateOf(true) }
     val values = remember { mutableStateMapOf<String, String>() }
     var loadError by remember { mutableStateOf<String?>(null) }
     var sending by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     val fieldErrors = remember { mutableStateMapOf<String, String>() }
     var added by remember { mutableStateOf<String?>(null) }
+    var queued by remember { mutableStateOf<String?>(null) }
     BackHandler(onBack = onBack)
 
+    fun use(loaded: CreatorForm) {
+        // What's been typed stays, if the form was fetched again.
+        loaded.fields.forEach { if (it.key !in values) values[it.key] = it.default }
+        form = loaded
+    }
+
+    /** The saved form at once, then the Mac's own if it can be reached. */
     suspend fun load() {
+        if (form == null) use(state.savedCreatorForm())
+        connecting = true
         try {
-            val client = state.macClient() ?: throw SyncException(UNREACHABLE)
-            val loaded = withContext(Dispatchers.IO) { client.creatorForm() }
+            val client = state.macClient()
+            if (client == null) {
+                online = false
+                return
+            }
+            val text = withContext(Dispatchers.IO) { client.creatorFormText() }
+            val loaded = CreatorForm.fromJson(JSONObject(text))
             if (loaded.fields.any { it.required && !it.isKnownType }) {
                 loadError = "Update Curated on this phone to add creators from here."
                 return
             }
-            // What's been typed stays, if the form was fetched again.
-            loaded.fields.forEach { if (it.key !in values) values[it.key] = it.default }
-            form = loaded
+            state.saveCreatorForm(text)
+            use(loaded)
+            online = true
             loadError = null
-        } catch (e: Exception) {
-            loadError = macMessage(e)
+        } catch (e: SyncException) {
+            if (e.status != 0) loadError = macMessage(e) else online = false
+        } catch (_: Exception) {
+            online = false  // Lost on the way: add it at the next sync.
+        } finally {
+            connecting = false
         }
     }
     LaunchedEffect(Unit) { load() }
 
     val shown = form?.fields.orEmpty().filter { it.isKnownType && it.isShown(values) }
+    val drawsKeep = form?.hasKeepChoice == true
     val canSend = !sending && form != null && shown.none { it.required && values[it.key].orEmpty().isBlank() }
+    val shortsOff = shown.any { it.key == "shorts" } && values["shorts"] == "false"
+
+    fun sentValues(): Map<String, String> {
+        val sent = shown.associate { it.key to values[it.key].orEmpty() }.toMutableMap()
+        // Keeping by count is for short videos, not a channel with Shorts off.
+        if (shortsOff && "keepMode" in sent) sent["keepMode"] = "days"
+        sent["input"]?.let { sent["input"] = it.trim() }
+        return sent
+    }
 
     fun send() {
         val current = form ?: return
@@ -183,24 +268,40 @@ fun AddCreatorScreen(onBack: () -> Unit) {
             sending = true
             message = null
             fieldErrors.clear()
+            val sent = sentValues()
+            val client = if (online) state.macClient() else null
+            if (client == null) {
+                queued = state.queueCreator(current.version, sent)
+                sending = false
+                return@launch
+            }
             try {
-                val client = state.macClient() ?: throw SyncException(UNREACHABLE)
-                val sent = shown.associate { it.key to values[it.key].orEmpty() }
                 val reply = withContext(Dispatchers.IO) { client.addCreator(current.version, sent) }
                 if (reply.optBoolean("added")) {
                     added = reply.getString("message")
                 } else {
                     val errors = reply.optJSONObject("fieldErrors")
                     errors?.keys()?.forEach { fieldErrors[it] = errors.getString(it) }
-                    // Beside the field where there is one.
+                    // Beside the field where there is one (the Keep fields share one place).
                     if (fieldErrors.isEmpty() || fieldErrors.keys.any { key -> shown.none { it.key == key } }) message = reply.getString("message")
                     if (reply.optBoolean("formChanged")) load()
                 }
-            } catch (e: Exception) {
-                message = macMessage(e)
+            } catch (e: SyncException) {
+                if (e.status != 0) message = macMessage(e)
+                else { online = false; queued = state.queueCreator(current.version, sent) }
+            } catch (_: Exception) {
+                // The Mac went away mid-request.
+                online = false
+                queued = state.queueCreator(current.version, sent)
             }
             sending = false
         }
+    }
+
+    fun change(key: String, value: String) {
+        values[key] = value
+        fieldErrors.remove(key)
+        message = null
     }
 
     Scaffold(
@@ -225,11 +326,33 @@ fun AddCreatorScreen(onBack: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                if (!online && !connecting) {
+                    Text(
+                        "Your Mac isn't reachable. The creator will be added at the next sync.",
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    )
+                }
                 shown.forEach { field ->
-                    FormField(field, values[field.key].orEmpty(), fieldErrors[field.key]) {
-                        values[field.key] = it
-                        fieldErrors.remove(field.key)
-                        message = null
+                    if (drawsKeep && field.key in CreatorForm.KEEP_KEYS) {
+                        if (field.key == "keepMode") {
+                            KeepChoice(
+                                values, shown.map { it.key }.toSet(), shortsOff, fieldErrors,
+                                showsLong = values["longForm"] == "true" && shown.any { it.key == "longForm" }, onChange = ::change,
+                            )
+                        }
+                    } else {
+                        FormField(field, values[field.key].orEmpty(), fieldErrors[field.key]) { change(field.key, it) }
+                    }
+                }
+                val waiting = state.waitingCreators
+                if (waiting.isNotEmpty()) {
+                    HorizontalDivider()
+                    Text("Waiting for the next sync", style = MaterialTheme.typography.titleSmall)
+                    waiting.forEach { creator ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(creator.name, Modifier.weight(1f))
+                            TextButton(onClick = { state.cancelPendingCreator(creator.id) }) { Text("Don't add") }
+                        }
                     }
                 }
             }
@@ -242,6 +365,102 @@ fun AddCreatorScreen(onBack: () -> Unit) {
             confirmButton = { TextButton(onClick = onBack) { Text("OK") } },
         )
     }
+    queued?.let {
+        AlertDialog(
+            onDismissRequest = onBack,
+            title = { Text("Added at the next sync") }, text = { Text(it) },
+            confirmButton = { TextButton(onClick = onBack) { Text("OK") } },
+        )
+    }
+}
+
+private fun daysLabel(n: Int) = "$n day${if (n == 1) "" else "s"}"
+
+/**
+ * As the Keep popover in Creators & Downloads on the Mac: videos from the last N days, or the newest N unwatched (with
+ * Historical for older ones). Changing a number picks its choice.
+ */
+@Composable
+private fun KeepChoice(
+    values: Map<String, String>, shown: Set<String>, shortsOff: Boolean, errors: Map<String, String>, showsLong: Boolean,
+    onChange: (String, String) -> Unit,
+) {
+    val days = (values["days"]?.toIntOrNull() ?: 3).coerceIn(1, 365)
+    val count = (values["keepVideos"]?.toIntOrNull() ?: 5).coerceIn(1, 100)
+    val byCount = values["keepMode"] == "videos" && !shortsOff
+    val muted = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Keep")
+        KeepRow(!byCount, enabled = true, onSelect = { onChange("keepMode", "days") }) {
+            Text("Videos from the last ", Modifier.weight(1f, fill = false))
+            NumberStepper(daysLabel(days), days, 1..365) { onChange("days", "$it"); onChange("keepMode", "days") }
+        }
+        KeepRow(byCount, enabled = !shortsOff, onSelect = { onChange("keepMode", "videos") }) {
+            Text("The newest ", Modifier.weight(1f, fill = false))
+            NumberStepper("$count unwatched", count, 1..100, enabled = !shortsOff) {
+                onChange("keepVideos", "$it"); onChange("keepMode", "videos")
+            }
+        }
+        if (byCount && "keepHistorical" in shown) {
+            Row(Modifier.padding(start = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Historical")
+                    Text("When there aren't enough new videos, also download older ones not yet downloaded.",
+                        style = MaterialTheme.typography.bodySmall, color = muted)
+                }
+                Switch(checked = values["keepHistorical"] == "true", onCheckedChange = { onChange("keepHistorical", if (it) "true" else "false") })
+            }
+        }
+        if (byCount && "days" in shown) {
+            Row(Modifier.padding(start = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Long videos from the last ", Modifier.weight(1f, fill = false))
+                NumberStepper(daysLabel(days), days, 1..365) { onChange("days", "$it") }
+            }
+        }
+        CreatorForm.KEEP_KEYS.sorted().forEach { key ->
+            errors[key]?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        }
+        val footnote = when {
+            shortsOff -> "Keeping a number of videos is for short videos. Long videos are kept until you watch or delete them."
+            byCount -> null
+            showsLong -> "How far back to look for new videos. Long videos are kept until you watch or delete them."
+            else -> "How far back to look for new videos."
+        }
+        footnote?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = muted) }
+    }
+}
+
+@Composable
+private fun KeepRow(selected: Boolean, enabled: Boolean, onSelect: () -> Unit, content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
+    Row(Modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.4f), verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.material3.RadioButton(selected = selected, onClick = onSelect, enabled = enabled)
+        content()
+    }
+}
+
+/** A number with − and + beside it. */
+@Composable
+private fun NumberStepper(label: String, value: Int, range: IntRange, enabled: Boolean = true, onChange: (Int) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, fontWeight = FontWeight.SemiBold)
+        TextButton(onClick = { onChange(value - 1) }, enabled = enabled && value > range.first) { Text("−", style = MaterialTheme.typography.titleMedium) }
+        TextButton(onClick = { onChange(value + 1) }, enabled = enabled && value < range.last) { Text("+", style = MaterialTheme.typography.titleMedium) }
+    }
+}
+
+/** Says why the Mac couldn't add a creator that was waiting for a sync. */
+@Composable
+fun CreatorFailureDialog() {
+    val state = LocalContext.current.curated.state
+    val failure = state.creatorFailure ?: return
+    AlertDialog(
+        onDismissRequest = { state.dismissCreatorFailure(failure.id) },
+        title = { Text("Couldn't add ${failure.name}") },
+        text = {
+            Text("Your Mac couldn't add ${failure.name}, which was waiting for this sync.\n\n${failure.error.orEmpty()}\n\nTry adding it on your Mac.")
+        },
+        confirmButton = { TextButton(onClick = { state.dismissCreatorFailure(failure.id) }) { Text("OK") } },
+    )
 }
 
 @Composable

@@ -60,6 +60,7 @@ struct AvatarView: View {
                 Circle().strokeBorder(platformRing(username), lineWidth: max(1.5, size / 24))
             }
         }
+        .overlay(alignment: .bottomTrailing) { CreatorBreakBadge(username: username, size: size) }
         .grayscale(dimmed ? 1 : 0)
         .opacity(dimmed ? 0.45 : 1)
         .accessibilityHidden(true)

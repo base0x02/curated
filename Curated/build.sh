@@ -3,8 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-VERSION="2.3"
-BUILD_NUMBER="29"
+VERSION="2.4"
+BUILD_NUMBER="31"
 
 # The Command Line Tools lack SwiftUI's macro plugin (@Entry, @Observable…) and actool, so when they're the active
 # developer dir, build with a full Xcode instead: the newest non-beta one in /Applications, else a beta.

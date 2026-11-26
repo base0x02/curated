@@ -11,6 +11,8 @@ import UIKit
 ///   -curatedPicker automix|top|...      open that mix's category picker (CuratedApp)
 ///   -curatedHome                        start on Home instead of in Automix (CuratedApp)
 ///   -curatedSettings                    start in Settings (CuratedApp)
+///   -curatedBreaks                      with -curatedSettings, open See Less / Snooze (SettingsView)
+///   -curatedAddCreator                  open Add Creator a second after launch (CuratedApp)
 ///   -curatedSettingsPlayback            open Settings on its Playback page (SettingsView, with -curatedSettings)
 ///   -curatedTestSpeed                   after the first sync, play Automix at 2× and log what each video really plays at (Documents/diagnostics.log)
 ///   CURATED_TEST_OLDER=<creator key>    open that creator's older videos 2 seconds after launch ("1": youtube@jawed) (CuratedApp)

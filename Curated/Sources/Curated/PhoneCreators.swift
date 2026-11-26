@@ -112,6 +112,7 @@ extension AppModel {
         let youTubeChannel = [[Condition(field: "platform", equals: ["youtube"]), Condition(field: "input", matches: Self.linkPattern, negate: true), notPlaylist],
                               [Condition(field: "input", matches: Self.youTubeLinkPattern), notPlaylist]]
         let byCount = Condition(field: "keepMode", equals: ["videos"])
+        let byDays = Condition(field: "keepMode", equals: ["videos"], negate: true)
         let keepVideos = UserDefaults.standard.integer(forKey: "newCreatorKeepVideos")
         let historical = UserDefaults.standard.bool(forKey: "newCreatorKeepHistorical")
         var fields: [CreatorForm.Field] = [
@@ -123,14 +124,17 @@ extension AppModel {
                   defaultValue: "tiktok", showIf: [[Condition(field: "input", matches: Self.linkPattern, negate: true)]]),
             .init(key: "shorts", type: "toggle", label: "Shorts", defaultValue: "true", showIf: youTubeChannel),
             .init(key: "longForm", type: "toggle", label: "Long Videos", defaultValue: "false", showIf: youTubeChannel),
+            // As the Keep popover in Creators & Downloads: videos from the last N days, or the newest N unwatched
+            // (optionally with older, historical ones). A phone that knows these keys draws them as that one choice.
             .init(key: "keepMode", type: "choice", label: "Keep",
-                  detail: "Long videos always use the days, and stay until you watch or delete them.",
-                  choices: [Choice(value: "days", label: "Last Few Days"), Choice(value: "videos", label: "Newest Unwatched")],
+                  choices: [Choice(value: "days", label: "Videos from the Last Few Days"), Choice(value: "videos", label: "The Newest Unwatched")],
                   defaultValue: keepVideos > 0 ? "videos" : "days",
                   showIf: [[notPlaylist]]),
-            .init(key: "days", type: "number", label: "Days to Look Back", min: 1, max: 365,
-                  defaultValue: "\(max(1, settings.defaultDays))", showIf: [[notPlaylist]]),
-            .init(key: "keepVideos", type: "number", label: "Unwatched Videos to Keep", min: 1, max: 100,
+            // Only with the days choice, or for long videos, which always use the days.
+            .init(key: "days", type: "number", label: "Days", min: 1, max: 365,
+                  defaultValue: "\(max(1, settings.defaultDays))",
+                  showIf: [[byDays, notPlaylist]] + youTubeChannel.map { $0 + [Condition(field: "longForm", equals: ["true"])] }),
+            .init(key: "keepVideos", type: "number", label: "Unwatched Videos", min: 1, max: 100,
                   defaultValue: "\(keepVideos > 0 ? keepVideos : 5)", showIf: [[byCount, notPlaylist]]),
             .init(key: "keepHistorical", type: "toggle", label: "Historical",
                   detail: "When there aren't enough new videos, also download older ones not yet downloaded.",

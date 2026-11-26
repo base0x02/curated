@@ -364,3 +364,11 @@ Release of everything since 1.5: phone sync with the Fold and the new pairing sc
 - Turning a platform's suggestions off asks before deleting its suggested videos, and Curated also asks at launch if suggested videos are still here with suggestions off
 - Right-click a suggested creator and choose Add to Creators… to follow them in a category of your choice: their suggested videos move to them and their recent videos download
 - Phones get the suggestions and can add a suggested creator from the player (API 11). An add asked for while the Mac was out of reach is made at the phone's next sync
+
+## 2.4 · 2026-11-26
+
+- See Less: a creator's ⋯ menu in Creators & Downloads has See Less (a turtle). Each download then takes only the most-viewed video from that creator's download window (never older, historical ones), and only when none from the window is downloaded yet, so you get about one video per window. The rest are skipped
+- Snooze: the same menu snoozes a creator for 30 days (change it in Settings → Downloads → Snooze). Nothing of theirs downloads until then; videos already here stay. Wake Up in the menu ends it early
+- Snoozed creators have a Zzz on their avatar and See Less ones a turtle, and their row says until when or how often
+- Phones can set See Less and Snooze too, and see them (API 12)
+- Adding a creator from a phone: the Keep choice now reads as it does here, "Videos from the last N days" or "The newest N unwatched", and the days only show when they apply

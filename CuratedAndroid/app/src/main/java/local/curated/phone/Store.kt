@@ -37,6 +37,29 @@ class Store(context: Context) {
         if (follows.isEmpty()) pendingFollowsFile.delete()
         else writeAtomically(pendingFollowsFile, org.json.JSONArray(follows.map { it.toJson() }).toString())
     }
+    /** Creators added from Add Creator while the Mac was out of reach (`PendingCreator`). */
+    private val pendingCreatorsFile = File(root, "pendingcreators.json")
+    /** The last add-creator form the Mac sent, so creators can be added while it's out of reach. */
+    private val creatorFormFile = File(root, "creatorform.json")
+
+    @Synchronized
+    fun loadPendingCreators(): List<PendingCreator> = runCatching {
+        val array = org.json.JSONArray(pendingCreatorsFile.readText())
+        (0 until array.length()).map { PendingCreator.fromJson(array.getJSONObject(it)) }
+    }.getOrDefault(emptyList())
+
+    @Synchronized
+    fun savePendingCreators(creators: List<PendingCreator>) {
+        if (creators.isEmpty()) pendingCreatorsFile.delete()
+        else writeAtomically(pendingCreatorsFile, org.json.JSONArray(creators.map { it.toJson() }).toString())
+    }
+
+    fun loadCreatorForm(): String? = runCatching { creatorFormFile.readText() }.getOrNull()
+
+    fun saveCreatorForm(text: String?) {
+        if (text == null) creatorFormFile.delete() else writeAtomically(creatorFormFile, text)
+    }
+
     val prefs = context.getSharedPreferences("curated", Context.MODE_PRIVATE)
 
     init {

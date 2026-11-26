@@ -140,11 +140,12 @@ private struct SyncSettings: View {
     @Environment(\.scenePhase) private var scenePhase
     /// Here, on the page: a sheet on a section inside the form closes Settings instead of opening.
     @State private var addingCreator = false
+    @State private var takingBreaks = false
 
     var body: some View {
         Form {
             if let pairing = app.pairing {
-                PairedSections(pairing: pairing, addingCreator: $addingCreator)
+                PairedSections(pairing: pairing, addingCreator: $addingCreator, takingBreaks: $takingBreaks)
             } else {
                 PairSections()
             }
@@ -153,6 +154,16 @@ private struct SyncSettings: View {
         .navigationTitle("Sync")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $addingCreator) { AddCreatorView() }
+        .sheet(isPresented: $takingBreaks) { CreatorBreaksView() }
+        #if DEBUG
+        .task {
+            if ProcessInfo.processInfo.arguments.contains("-curatedBreaks") {
+                try? await Task.sleep(for: .seconds(1))
+                takingBreaks = true
+            }
+        }
+        #endif
+        .creatorFailureAlert(app, when: !addingCreator && !takingBreaks)
         // Only while it's on screen is the Mac's download followed.
         .onAppear { app.watchMacDownload() }
         .onDisappear { app.stopWatchingMacDownload(keepingRequested: true) }
@@ -693,6 +704,7 @@ private struct PairedSections: View {
     let pairing: Pairing
     @State private var confirmUnpair = false
     @Binding var addingCreator: Bool
+    @Binding var takingBreaks: Bool
 
     var body: some View {
         @Bindable var app = app
@@ -767,7 +779,12 @@ private struct PairedSections: View {
                 Label("Add Creator", systemImage: "person.badge.plus")
             }
             .accessibilityIdentifier("addCreator")
+            Button { takingBreaks = true } label: {
+                Label("See Less / Snooze", systemImage: CreatorBreakSymbol.snooze)
+            }
+            .accessibilityIdentifier("creatorBreaks")
         }
+
         .confirmationDialog("Unpair from \(pairing.macName)?", isPresented: $confirmUnpair, titleVisibility: .visible) {
             Button("Unpair", role: .destructive) { app.unpair() }
         } message: {

@@ -53,6 +53,12 @@ struct CuratedApp: App {
                 router.olderVideos = OlderVideosTarget(id: key, name: "@\(creatorHandle(key))")
             }
         }
+        if ProcessInfo.processInfo.arguments.contains("-curatedAddCreator") {
+            Task {
+                try? await Task.sleep(for: .seconds(1))
+                router.addingCreator = true
+            }
+        }
         #endif
         if openSettings {
             router.settingsShown = true
@@ -270,6 +276,8 @@ struct RootView: View {
         .onChange(of: playback.current?.isLong == true) { _, isLong in if !isLong { setTurnedFullscreen(false) } }
         .overlay { mixPicker }
         .fullScreenCover(isPresented: Bindable(router).settingsShown) { SettingsView() }
+        // Settings shows its own while it's up.
+        .creatorFailureAlert(app, when: !router.settingsShown && !router.addingCreator)
         // On its own view: two presentations on one view get in each other's way.
         .background { Color.clear.sheet(item: Bindable(router).olderVideos) { OlderVideosView(target: $0) } }
         .background { Color.clear.sheet(isPresented: Bindable(router).addingCreator) { AddCreatorView() } }

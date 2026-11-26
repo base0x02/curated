@@ -43,6 +43,9 @@ struct Creator: Codable, Identifiable, Hashable {
     var suggested: Bool?
     /// Suggested creators only: "tiktok" or "youtube".
     var platform: String?
+    /// API 12: See Less is on (about one most-viewed video per day window), and when a snooze ends (only while snoozed).
+    var seeLess: Bool?
+    var snoozedUntil: Date?
     var isSuggested: Bool { suggested == true || isSuggestedKey(username) }
     /// A channel with long videos on, whose older videos can be asked for. Nil from Macs before API 10.
     var isPlaylist: Bool { playlist == true }
@@ -133,12 +136,14 @@ struct Manifest: Codable {
     let macName: String
     let timeLimitMinutes: Int
     let categories: [Category]
-    let creators: [Creator]
+    var creators: [Creator]
     let videos: [Video]
     /// The categories whose Automix also plays the Vines (a Funny category, on the Mac). Nil from Macs before Vines.
     var vineCategories: [String]?
     /// When the Mac last finished a download. Nil from Macs before API 6, and until its first download.
     var lastDownloadAt: Date?
+    /// API 12: how long Snooze lasts, in days.
+    var snoozeDays: Int?
 
     static func decode(_ data: Data) throws -> Manifest {
         try JSONDecoder.curated.decode(Manifest.self, from: data)
@@ -358,4 +363,39 @@ struct PendingFollow: Codable, Hashable {
     let creator: String
     let category: String?
     let at: Date
+}
+
+/// A creator added from Add Creator while the Mac couldn't be reached, sent at the next sync. `error` is set when the
+/// Mac turned it down, until the user has seen why.
+struct PendingCreator: Codable, Hashable, Identifiable {
+    var id = UUID()
+    let formVersion: Int
+    let values: [String: String]
+    let at: Date
+    var error: String?
+
+    /// What was typed: a username or a link.
+    var name: String {
+        let input = (values["input"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return input.isEmpty || input.contains("/") || input.hasPrefix("@") ? input : "@" + input
+    }
+}
+
+/// See Less or Snooze picked on this device for a creator, sent to the Mac at the next sync. Nil leaves that one as it is.
+struct PendingRule: Codable, Hashable {
+    let creator: String
+    var seeLess: Bool?
+    var snoozed: Bool?
+    var at: Date
+}
+
+/// A creator's See Less and Snooze, as the Mac last said with anything waiting to be sent on top.
+struct CreatorBreakState: Equatable {
+    var seeLess = false
+    var snoozedUntil: Date?
+    /// Snoozed here, not yet sent: the Mac sets the date.
+    var snoozePending = false
+    var waiting = false
+
+    var snoozed: Bool { snoozePending || (snoozedUntil ?? .distantPast) > Date() }
 }

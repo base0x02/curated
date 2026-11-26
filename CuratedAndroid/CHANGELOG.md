@@ -281,3 +281,9 @@ Version now tracks the Mac app.
 
 - Suggested short videos from your Mac (Curated 2.3 for Mac, Settings → Downloads): a Suggested card on Home, shown while your Mac has suggestions, with its own Automix. Suggested creators have a dashed pink ring around their avatar, and the main Automix plays them as one more creator
 - While a suggested video plays, a pink Add button beside the creator's name adds them to your Mac's creators in the category you pick (also Add to Creators… when you hold their avatar). If your Mac can't be reached, the button says "Next sync" and the creator is added then
+
+## 2026-11-26 · Add creators away from the Mac, clearer Keep, watched history syncs as you watch
+
+- Add Creator works away from your Mac: the creator is added at the next sync, and the screen lists the ones waiting. If your Mac can't add one, a message says why and suggests adding it on the Mac
+- Add Creator's Keep options now match the Mac: "Videos from the last N days" or "The newest N unwatched" with Historical
+- Watched history now syncs with your Mac every 5 short videos and after every long one, over USB or on Wi-Fi where your Mac answers, so another device picks up where this one is

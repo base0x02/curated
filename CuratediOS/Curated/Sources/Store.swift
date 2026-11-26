@@ -30,6 +30,30 @@ struct Store {
         write(follows, to: pendingFollowsFile, with: .curated)
     }
 
+    /// Creators added from Add Creator while the Mac was out of reach (`PendingCreator`).
+    var pendingCreatorsFile: URL { root.appendingPathComponent("pendingcreators.json") }
+    /// The last add-creator form the Mac sent, so creators can be added while it's out of reach.
+    var creatorFormFile: URL { root.appendingPathComponent("creatorform.json") }
+
+    func loadPendingCreators() -> [PendingCreator] {
+        (try? Data(contentsOf: pendingCreatorsFile)).flatMap { try? JSONDecoder.curated.decode([PendingCreator].self, from: $0) } ?? []
+    }
+
+    func savePendingCreators(_ creators: [PendingCreator]) {
+        write(creators, to: pendingCreatorsFile, with: .curated)
+    }
+
+    /// See Less and Snooze waiting for the next sync (`PendingRule`).
+    var pendingRulesFile: URL { root.appendingPathComponent("pendingrules.json") }
+
+    func loadPendingRules() -> [PendingRule] {
+        (try? Data(contentsOf: pendingRulesFile)).flatMap { try? JSONDecoder.curated.decode([PendingRule].self, from: $0) } ?? []
+    }
+
+    func savePendingRules(_ rules: [PendingRule]) {
+        write(rules, to: pendingRulesFile, with: .curated)
+    }
+
     /// Saves marks off the main thread, in order, so marking a video watched doesn't hold up the next one starting.
     private static let writer = DispatchQueue(label: "local.curated.store", qos: .utility)
 

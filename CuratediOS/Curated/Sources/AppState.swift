@@ -21,6 +21,10 @@ final class AppState {
     private(set) var suggestedLibraries: [CreatorLibrary] = []
     /// Suggested creators to add on the Mac, sent at the next sync when the Mac couldn't be reached.
     private(set) var pendingFollows: [PendingFollow] = []
+    /// Creators from Add Creator waiting for the next sync, and ones the Mac turned down (with `error`) until seen.
+    private(set) var pendingCreators: [PendingCreator] = []
+    /// See Less and Snooze picked here, waiting for the next sync.
+    private(set) var pendingRules: [PendingRule] = []
     /// Which Home is showing: short or long videos. Always short at launch, as on the Mac.
     var form = VideoForm.short {
         didSet { if form == .long && oldValue != .long { onSwitchedToLong?() } }
@@ -180,6 +184,9 @@ final class AppState {
         nowPlayingMark = store.loadNowPlaying()
         playbackRules = store.loadPlaybackRules()
         pendingFollows = store.loadPendingFollows()
+        pendingCreators = store.loadPendingCreators()
+        pendingRules = store.loadPendingRules()
+        _ = NetworkWatch.shared  // Starts watching, so it knows by the first video.
         rebuildLibraries()
     }
 
@@ -451,6 +458,51 @@ final class AppState {
         if value { for video in changed { clearNowPlaying(video) } }
         // Watching a saved video takes it off Watch Later.
         if value { setWatchLater(changed, false) }
+        if value { noteWatched(changed) }
+    }
+
+    /// Short videos watched since watched history was last swapped with the Mac.
+    @ObservationIgnored private var shortsSinceWatchedSwap = 0
+    @ObservationIgnored private var watchedSwap: Task<Void, Never>?
+    /// How many short videos go by between swaps. Every long video swaps.
+    static let shortsPerWatchedSwap = 5
+
+    /// Swaps watched history with the Mac every few short videos and after every long one, so switching to another
+    /// device picks up where this one is. Only on Wi-Fi (or wired), and only where the Mac answers at the address it
+    /// was last seen at: elsewhere it waits for the next time.
+    private func noteWatched(_ videos: [Video]) {
+        guard pairing != nil else { return }
+        shortsSinceWatchedSwap += videos.filter { !$0.isLong }.count
+        guard videos.contains(where: \.isLong) || shortsSinceWatchedSwap >= Self.shortsPerWatchedSwap else { return }
+        shortsSinceWatchedSwap = 0
+        guard watchedSwap == nil, !isSyncing, NetworkWatch.shared.onLocalNetwork else { return }
+        watchedSwap = Task {
+            await swapWatched()
+            watchedSwap = nil
+        }
+    }
+
+    /// Watched history, Watch Later, bookmarks and positions, plus anything waiting to be added: a sync without the
+    /// video list or downloads. Quiet: nothing is shown, and if the Mac isn't there it gives up at once.
+    func swapWatched() async {
+        guard let saved = pairing, !isSyncing else { return }
+        let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Curated watched")
+        defer { UIApplication.shared.endBackgroundTask(backgroundTask) }
+        guard let client = await connect(saved, quick: true) else { return }
+        await sendPendingFollows(client)
+        await sendPendingCreators(client)
+        await sendPendingRules(client)
+        guard let merged = try? await client.played(marks, watchLater: watchLaterMarks, bookmarks: bookmarkMarks) else { return }
+        mergePlayed(merged.marks)
+        mergeWatchLater(merged.watchLater)
+        mergeBookmarks(merged.bookmarks)
+        positionsChanged = false
+        if let reply = try? await client.positions(positionMarks, nowPlaying: nowPlayingMark, playback: playbackRules) {
+            merge(reply)
+        } else {
+            positionsChanged = true
+        }
+        Diagnostics.log("Swapped watched history with the Mac (\(marks.count) marks)")
     }
 
     // MARK: Watch Later
@@ -625,6 +677,142 @@ final class AppState {
         store.savePendingFollows(left)
     }
 
+    // MARK: Creators added while the Mac was out of reach
+
+    /// Creators still waiting for the next sync.
+    var waitingCreators: [PendingCreator] { pendingCreators.filter { $0.error == nil } }
+    /// The first creator the Mac turned down that the user hasn't seen yet.
+    var creatorFailure: PendingCreator? { pendingCreators.first { $0.error != nil } }
+
+    /// Adds a creator at the next sync. Returns what to tell the user.
+    func queueCreator(formVersion: Int, values: [String: String]) -> String {
+        let creator = PendingCreator(formVersion: formVersion, values: values, at: Date())
+        pendingCreators.removeAll { $0.error == nil && $0.name.lowercased() == creator.name.lowercased() }
+        pendingCreators.append(creator)
+        store.savePendingCreators(pendingCreators)
+        return "Your Mac isn't reachable right now. \(creator.name) will be added at the next sync. If your Mac can't add it, you'll see why here."
+    }
+
+    func cancelPendingCreator(_ id: UUID) {
+        pendingCreators.removeAll { $0.id == id }
+        store.savePendingCreators(pendingCreators)
+    }
+
+    /// The user has seen why the Mac turned it down.
+    func dismissCreatorFailure(_ id: UUID) { cancelPendingCreator(id) }
+
+    /// The last form the Mac sent, or, if this phone never got one, the fields every Mac with Add Creator understands.
+    func savedCreatorForm() -> CreatorForm {
+        if let data = try? Data(contentsOf: store.creatorFormFile), let form = try? JSONDecoder().decode(CreatorForm.self, from: data) {
+            return form
+        }
+        return CreatorForm.offline(categories: categories)
+    }
+
+    func saveCreatorForm(_ data: Data) {
+        try? data.write(to: store.creatorFormFile, options: .atomic)
+    }
+
+    /// Sends the creators that waited for the Mac. Ones it adds are done; ones it turns down keep its reason, to show;
+    /// ones that couldn't be sent wait for the next sync.
+    private func sendPendingCreators(_ client: SyncClient) async {
+        let waiting = waitingCreators
+        guard !waiting.isEmpty else { return }
+        if isSyncing { syncStep = "Adding creators…" }
+        for creator in waiting {
+            var error: String?
+            do {
+                let reply = try await client.addCreator(formVersion: creator.formVersion, values: creator.values)
+                if !reply.added {
+                    let details = (reply.fieldErrors ?? [:]).values.filter { $0 != reply.message }.sorted()
+                    error = ([reply.message] + details).joined(separator: " ")
+                }
+            } catch let problem as SyncError where problem.status != 0 {
+                error = problem.status == 404 ? "Your Mac needs updating to add creators from here." : problem.message
+            } catch {
+                continue  // Not sent: the next sync tries again.
+            }
+            guard let i = pendingCreators.firstIndex(where: { $0.id == creator.id }) else { continue }
+            if let error {
+                pendingCreators[i].error = error
+                Diagnostics.log("Couldn't add \(creator.name) on the Mac: \(error)")
+            } else {
+                pendingCreators.remove(at: i)
+            }
+        }
+        store.savePendingCreators(pendingCreators)
+    }
+
+    // MARK: See Less and Snooze
+
+    /// The Mac's creators that can be seen less of or snoozed: not playlists, Vines or suggestions. By name.
+    var breakableCreators: [Creator] {
+        (manifest?.creators ?? [])
+            .filter { !$0.isPlaylist && !$0.isVine && !$0.isSuggested }
+            .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+    }
+
+    /// How long Snooze lasts on the Mac.
+    var snoozeDays: Int { manifest?.snoozeDays ?? 30 }
+
+    /// Whether the Mac knows See Less and Snooze (API 12).
+    var macHasCreatorBreaks: Bool { manifest?.snoozeDays != nil }
+
+    func breakState(_ creatorKey: String) -> CreatorBreakState {
+        let creator = manifest?.creators.first { $0.username == creatorKey }
+        var state = CreatorBreakState(seeLess: creator?.seeLess == true, snoozedUntil: creator?.snoozedUntil)
+        if let rule = pendingRules.first(where: { $0.creator == creatorKey }) {
+            state.waiting = true
+            if let seeLess = rule.seeLess { state.seeLess = seeLess }
+            if let snoozed = rule.snoozed {
+                if snoozed { state.snoozePending = !state.snoozed } else { state.snoozedUntil = nil }
+            }
+        }
+        return state
+    }
+
+    /// Sets See Less or Snooze for a creator. It goes to the Mac at the next sync, which is tried quietly at once.
+    func setBreak(_ creatorKey: String, seeLess: Bool? = nil, snoozed: Bool? = nil) {
+        var rule = pendingRules.first { $0.creator == creatorKey } ?? PendingRule(creator: creatorKey, at: Date())
+        if let seeLess { rule.seeLess = seeLess }
+        if let snoozed { rule.snoozed = snoozed }
+        rule.at = Date()
+        pendingRules.removeAll { $0.creator == creatorKey }
+        pendingRules.append(rule)
+        store.savePendingRules(pendingRules)
+        Task { await swapWatched() }
+    }
+
+    /// Sends See Less and Snooze picked here. Ones the Mac answered are done (a Mac without them drops them too);
+    /// ones that couldn't be sent wait for the next sync.
+    private func sendPendingRules(_ client: SyncClient) async {
+        let waiting = pendingRules
+        guard !waiting.isEmpty else { return }
+        var sent: [PendingRule] = []
+        for rule in waiting {
+            do {
+                let reply = try await client.setCreatorRule(rule.creator, seeLess: rule.seeLess, snoozed: rule.snoozed)
+                Diagnostics.log("See Less/Snooze \(rule.creator): \(reply.message)")
+                sent.append(rule)
+                // Until the next video list says so too.
+                if reply.ok, let i = manifest?.creators.firstIndex(where: { $0.username == rule.creator }) {
+                    manifest?.creators[i].seeLess = reply.seeLess
+                    manifest?.creators[i].snoozedUntil = reply.snoozedUntil
+                }
+            } catch let error as SyncError where error.status == 404 && error.message.contains("Not found") {
+                continue  // A Mac from before See Less and Snooze: keep it for when it's updated.
+            } catch let error as SyncError where error.status != 0 {
+                Diagnostics.log("See Less/Snooze \(rule.creator) refused: \(error.message)")
+                sent.append(rule)
+            } catch {
+                continue
+            }
+        }
+        // Only the ones sent, and not changed again meanwhile.
+        pendingRules.removeAll { rule in sent.contains(rule) }
+        store.savePendingRules(pendingRules)
+    }
+
     // MARK: Pairing
 
     /// Returns an error message, or nil once paired.
@@ -664,6 +852,11 @@ final class AppState {
         store.saveBookmarks([:])
         pendingFollows = []
         try? FileManager.default.removeItem(at: store.pendingFollowsFile)
+        pendingCreators = []
+        try? FileManager.default.removeItem(at: store.pendingCreatorsFile)
+        pendingRules = []
+        try? FileManager.default.removeItem(at: store.pendingRulesFile)
+        try? FileManager.default.removeItem(at: store.creatorFormFile)
         collapsedCards = []
         lastSyncMessage = nil
         lastSyncAt = nil
@@ -851,6 +1044,8 @@ final class AppState {
 
         // Suggested creators added while the Mac was out of reach: before the list, so it already has them moved.
         await sendPendingFollows(client)
+        await sendPendingCreators(client)
+        await sendPendingRules(client)
 
         syncStep = "Checking for new videos…"
         // Vines and suggestions come with the short videos: listed every time, downloaded when short videos are.
@@ -994,7 +1189,8 @@ final class AppState {
 
     /// With `lookUp` (full syncs), finds the Mac by Bonjour and uses its best address, wired first. Otherwise, or if
     /// that finds nothing (some networks block Bonjour), tries where the Mac was last seen, then looks for any Mac.
-    private func connect(_ saved: Pairing, lookUp: Bool = false) async -> SyncClient? {
+    /// `quick` only tries where the Mac was last seen, for small swaps that shouldn't go looking.
+    private func connect(_ saved: Pairing, lookUp: Bool = false, quick: Bool = false) async -> SyncClient? {
         func reachable(_ host: String, _ port: Int) async -> Bool {
             (try? await SyncClient(host: host, port: port).info(timeout: 2)) != nil
         }
@@ -1013,7 +1209,7 @@ final class AppState {
             // Found above.
         } else if await reachable(saved.host, saved.port) {
             target = (saved.host, saved.port)
-        } else {
+        } else if !quick {
             syncStep = "Looking for your Mac on this network…"
             // The Mac this phone paired with first, then any other Curated on the network.
             let found = await Discovery.find().sorted { $0.name == saved.macName && $1.name != saved.macName }

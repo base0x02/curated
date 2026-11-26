@@ -455,6 +455,7 @@ struct CreatorManageRow: View {
             Divider().frame(height: 24)
             VStack(alignment: .leading, spacing: 1) {
                 Text(countsText)
+                if let breakText { Text(breakText).foregroundStyle(.secondary) }
                 if let waitingText { Text(waitingText).foregroundStyle(.secondary) }
                 checkedText
                 // Cut short with "…" like the other lines; hovering shows all of it.
@@ -524,8 +525,8 @@ struct CreatorManageRow: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.borderless)
-                    .disabled(model.isDownloading)
-                    .help("Download now")
+                    .disabled(model.isDownloading || creator.isSnoozed)
+                    .help(creator.isSnoozed ? "Snoozed. Wake them up to download" : "Download now")
                 }
             }
             .frame(width: RowControl.height)
@@ -545,6 +546,20 @@ struct CreatorManageRow: View {
                     Divider()
                     Button("Older Long Videos…") { model.pickOlderLong(creator) }
                         .disabled(model.isDownloading)
+                }
+                if !creator.playlist {
+                    Divider()
+                    Toggle(isOn: Binding(get: { creator.seeLess }, set: { model.setSeeLess($0, for: id) })) {
+                        Label("See Less", systemImage: CreatorBreak.seeLessSymbol)
+                    }
+                    if creator.isSnoozed {
+                        Button("Wake Up (Snoozed Until \(creator.snoozedUntil!.formatted(date: .abbreviated, time: .omitted)))",
+                               systemImage: "alarm") { model.setSnoozed(false, for: id) }
+                    } else {
+                        Button("Snooze for \(KeepButton.days(model.settings.snoozeDays))", systemImage: CreatorBreak.snoozeSymbol) {
+                            model.setSnoozed(true, for: id)
+                        }
+                    }
                 }
                 Divider()
                 MarkAllMenuItems(library: creator.playlist ? model.library(for: id, form: .long) ?? library : library)
@@ -584,6 +599,16 @@ struct CreatorManageRow: View {
     }
 
     /// "12 under 500K views", when the last check left some for having too few.
+    /// "Snoozed until 26 Dec", "See Less: one video per 3 days".
+    private var breakText: String? {
+        var parts: [String] = []
+        if creator.isSnoozed, let until = creator.snoozedUntil {
+            parts.append("Snoozed until \(until.formatted(date: .abbreviated, time: .omitted))")
+        }
+        if creator.seeLess { parts.append("See Less: one video per \(KeepButton.days(creator.days))") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     private var waitingText: String? {
         guard let minViews = creator.minViews, let waiting = model.runState.creators[id]?.belowMinViews, waiting > 0
         else { return nil }

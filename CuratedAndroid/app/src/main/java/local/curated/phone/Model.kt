@@ -425,3 +425,34 @@ data class PendingFollow(val creator: String, val category: String?, val at: Ins
         )
     }
 }
+
+/**
+ * A creator added from Add Creator while the Mac couldn't be reached, sent at the next sync. `error` is set when the Mac
+ * turned it down, until the user has seen why.
+ */
+data class PendingCreator(
+    val id: String, val formVersion: Int, val values: Map<String, String>, val at: Instant, val error: String? = null,
+) {
+    /** What was typed: a username or a link. */
+    val name: String
+        get() {
+            val input = values["input"].orEmpty().trim()
+            return if (input.isEmpty() || '/' in input || input.startsWith("@")) input else "@$input"
+        }
+
+    fun toJson(): JSONObject = JSONObject().put("id", id).put("formVersion", formVersion).put("values", JSONObject(values))
+        .put("at", at.toString()).put("error", error ?: JSONObject.NULL)
+
+    companion object {
+        fun fromJson(json: JSONObject): PendingCreator {
+            val values = json.optJSONObject("values")
+            return PendingCreator(
+                json.optString("id").ifEmpty { java.util.UUID.randomUUID().toString() },
+                json.optInt("formVersion", 1),
+                values?.keys()?.asSequence()?.associateWith { values.getString(it) }.orEmpty(),
+                runCatching { Instant.parse(json.getString("at")) }.getOrDefault(Instant.EPOCH),
+                json.optString("error").takeIf { it.isNotEmpty() && it != "null" },
+            )
+        }
+    }
+}

@@ -280,3 +280,15 @@ The iPhone companion, caught up with the Android app (version in step with the M
 
 - Suggested short videos from your Mac (Curated 2.3 for Mac, Settings → Downloads): a Suggested card on Home, shown while your Mac has suggestions, with its own Automix. Suggested creators have a dashed pink ring around their avatar, and the main Automix plays them as one more creator
 - While a suggested video plays, a pink Add button beside the creator's name adds them to your Mac's creators in the category you pick (also Add to Creators… when you hold their avatar). If your Mac can't be reached, the button says "Next sync" and the creator is added then
+
+## 2.4 · 2026-11-26
+
+- See Less / Snooze in Settings → Sync: pick a creator, then answer whether to see less of them (just their most-viewed new video each download window) or snooze them for 30 days. Your Mac gets it at the next sync, or straight away when it's reachable. Needs Curated 2.4 on the Mac
+- Snoozed creators have a Zzz on their avatar and See Less ones a turtle
+- Add Creator works away from your Mac: the creator is added at the next sync, and the screen lists the ones waiting (swipe to cancel). If your Mac can't add one, a message says why and suggests adding it on the Mac
+- Add Creator's Keep options now match the Mac: "Videos from the last N days" or "The newest N unwatched" with Historical
+- Watched history now syncs with your Mac every 5 short videos and after every long one, while on Wi-Fi where your Mac answers, so another device picks up where this one is
+
+## 2026-11-26 · See Less / Snooze always in Settings
+
+- See Less / Snooze is always in Settings → Sync once paired, instead of only after a sync with Curated 2.4 on the Mac. Until then it says to sync, and choices made wait for a Mac that understands them

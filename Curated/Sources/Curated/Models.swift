@@ -85,6 +85,14 @@ struct Creator: Codable, Identifiable, Hashable {
     /// A creator met in someone's For You or Shorts feed (see Suggested.swift), made up when the library is scanned.
     /// Never in `Config.creators`: following one adds a plain creator in its place.
     var suggested = false
+    /// See Less: each download takes only the most-viewed video posted in the day window (never historical ones), and
+    /// only when none from the window is downloaded yet, so about one video per window. The rest are skipped.
+    var seeLess = false
+    /// Snoozed: not downloaded at all until then (`AppSettings.snoozeDays` from when it was snoozed). Videos already
+    /// downloaded stay.
+    var snoozedUntil: Date? = nil
+
+    var isSnoozed: Bool { (snoozedUntil ?? .distantPast) > Date() }
 
     static let playlistLimits = [5, 10, 25, 50, 100]
 
@@ -164,6 +172,8 @@ struct Creator: Codable, Identifiable, Hashable {
         keepVideos = try c.decodeIfPresent(Int.self, forKey: .keepVideos)
         keepHistorical = try c.decodeIfPresent(Bool.self, forKey: .keepHistorical) ?? false
         suggested = try c.decodeIfPresent(Bool.self, forKey: .suggested) ?? false
+        seeLess = try c.decodeIfPresent(Bool.self, forKey: .seeLess) ?? false
+        snoozedUntil = try c.decodeIfPresent(Date.self, forKey: .snoozedUntil)
     }
 
     /// The ID in a YouTube playlist link ("…list=PL…"), if the input is one.
@@ -352,6 +362,8 @@ struct AppSettings: Codable, Equatable {
     var ipodExportPath: String?
     /// Suggested short videos from the signed-in TikTok For You and YouTube Shorts feeds (see Suggested.swift).
     var suggested = SuggestedSettings()
+    /// How long Snooze stops a creator's downloads.
+    var snoozeDays = 30
 
     var libraryURL: URL { URL(fileURLWithPath: libraryPath, isDirectory: true) }
 
@@ -397,6 +409,7 @@ struct AppSettings: Codable, Equatable {
         ipodCategories = try c.decodeIfPresent([String].self, forKey: .ipodCategories) ?? d.ipodCategories
         ipodExportPath = try c.decodeIfPresent(String.self, forKey: .ipodExportPath)
         suggested = (try? c.decodeIfPresent(SuggestedSettings.self, forKey: .suggested)) ?? d.suggested
+        snoozeDays = try c.decodeIfPresent(Int.self, forKey: .snoozeDays) ?? d.snoozeDays
     }
 }
 

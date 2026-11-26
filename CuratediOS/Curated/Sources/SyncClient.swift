@@ -98,7 +98,12 @@ struct SyncClient {
 
     /// The add-creator form. A Mac older than API 10 answers 404.
     func creatorForm() async throws -> CreatorForm {
-        try JSONDecoder().decode(CreatorForm.self, from: try await request("GET", "/creators/form"))
+        try JSONDecoder().decode(CreatorForm.self, from: try await creatorFormData())
+    }
+
+    /// The form as the Mac sent it, to keep for adding creators while the Mac is out of reach.
+    func creatorFormData() async throws -> Data {
+        try await request("GET", "/creators/form")
     }
 
     func addCreator(formVersion: Int, values: [String: String]) async throws -> AddCreatorReply {
@@ -108,6 +113,24 @@ struct SyncClient {
         }
         let body = try JSONEncoder().encode(Body(formVersion: formVersion, values: values))
         return try JSONDecoder().decode(AddCreatorReply.self, from: try await request("POST", "/creators", body: body))
+    }
+
+    struct RuleReply: Decodable {
+        let ok: Bool
+        let message: String
+        var seeLess: Bool?
+        var snoozedUntil: Date?
+    }
+
+    /// API 12: See Less and Snooze for one of the Mac's creators. A Mac before it answers 404.
+    func setCreatorRule(_ creator: String, seeLess: Bool?, snoozed: Bool?) async throws -> RuleReply {
+        struct Body: Encodable {
+            let seeLess: Bool?
+            let snoozed: Bool?
+        }
+        let path = "/creators/\(creator)/rule"  // As the older-videos routes: the Mac reads the key as it is.
+        let body = try JSONEncoder().encode(Body(seeLess: seeLess, snoozed: snoozed))
+        return try JSONDecoder.curated.decode(RuleReply.self, from: try await request("POST", path, body: body))
     }
 
     struct FollowReply: Decodable {
@@ -353,4 +376,23 @@ final class LockedBox<Value>: @unchecked Sendable {
     func get() -> Value { lock.withLock { value } }
     func set(_ newValue: Value) { lock.withLock { value = newValue } }
     func update(_ body: (inout Value) -> Void) { lock.withLock { body(&value) } }
+}
+
+/// Whether the phone is on Wi-Fi or a wired network, where the Mac can be, rather than only cellular.
+final class NetworkWatch: @unchecked Sendable {
+    static let shared = NetworkWatch()
+
+    private let monitor = NWPathMonitor()
+    private let lock = NSLock()
+    private var local = true
+
+    private init() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            let local = path.status == .satisfied && (path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet))
+            self?.lock.withLock { self?.local = local }
+        }
+        monitor.start(queue: DispatchQueue(label: "local.curated.network"))
+    }
+
+    var onLocalNetwork: Bool { lock.withLock { local } }
 }

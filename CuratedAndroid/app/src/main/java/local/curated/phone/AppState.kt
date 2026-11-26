@@ -47,6 +47,8 @@ class AppState(private val context: Context) {
     var suggestedLibraries by mutableStateOf(emptyList<CreatorLibrary>()); private set
     /** Suggested creators to add on the Mac, sent at the next sync when the Mac couldn't be reached. */
     var pendingFollows by mutableStateOf(store.loadPendingFollows()); private set
+    /** Creators from Add Creator waiting for the next sync, and ones the Mac turned down (with `error`) until seen. */
+    var pendingCreators by mutableStateOf(store.loadPendingCreators()); private set
     /** A suggested creator being added to the Mac's creators (FollowSuggestedDialog). */
     var followingSuggested by mutableStateOf<String?>(null)
     /** Which Home is showing: short or long videos. Always short at launch, as on the Mac. */
@@ -458,6 +460,59 @@ class AppState(private val context: Context) {
         if (value) changed.forEach { clearNowPlaying(it) }
         // Watching a saved video takes it off Watch Later.
         if (value) setWatchLater(changed, false)
+        if (value) noteWatched(changed)
+    }
+
+    /** Short videos watched since watched history was last swapped with the Mac. */
+    private var shortsSinceWatchedSwap = 0
+    private var watchedSwap: Job? = null
+
+    /**
+     * Swaps watched history with the Mac every few short videos and after every long one, so switching to another device
+     * picks up where this one is. Only over USB, or on Wi-Fi (or wired) where the Mac answers at the address it was last
+     * seen at: elsewhere it waits for the next time.
+     */
+    private fun noteWatched(videos: List<Video>) {
+        if (pairing == null) return
+        shortsSinceWatchedSwap += videos.count { it.form != VideoForm.LONG }
+        if (videos.none { it.form == VideoForm.LONG } && shortsSinceWatchedSwap < SHORTS_PER_WATCHED_SWAP) return
+        shortsSinceWatchedSwap = 0
+        if (watchedSwap?.isActive == true || isSyncing) return
+        watchedSwap = scope.launch { swapWatched() }
+    }
+
+    private fun onLocalNetwork(): Boolean {
+        val connectivity = context.getSystemService(android.net.ConnectivityManager::class.java) ?: return true
+        val caps = connectivity.getNetworkCapabilities(connectivity.activeNetwork) ?: return false
+        return caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) ||
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET)
+    }
+
+    /**
+     * Watched history, Watch Later, bookmarks and positions, plus anything waiting to be added: a sync without the video
+     * list or downloads. Quiet: nothing is shown, and if the Mac isn't there it gives up at once.
+     */
+    suspend fun swapWatched() {
+        val saved = pairing ?: return
+        if (isSyncing || !syncLock.tryLock()) return
+        try {
+            val client = connect(saved, quick = true, savedAddress = onLocalNetwork()) ?: return
+            sendPendingFollows(client)
+            sendPendingCreators(client)
+            val (localMarks, localLater, localBookmarks) = Triple(marks, watchLaterMarks, bookmarkMarks)
+            val (merged, mergedLater, mergedBookmarks) = runCatching {
+                withContext(Dispatchers.IO) { client.played(localMarks, localLater, localBookmarks) }
+            }.getOrNull() ?: return
+            mergePlayed(merged)
+            mergeWatchLater(mergedLater)
+            mergeBookmarks(mergedBookmarks)
+            positionsChanged = false
+            val (localPositions, localNowPlaying, localRules) = Triple(positionMarks, nowPlayingMark, playbackRules)
+            val reply = runCatching { withContext(Dispatchers.IO) { client.positions(localPositions, localNowPlaying, localRules) } }.getOrNull()
+            if (reply != null) merge(reply) else positionsChanged = true
+        } finally {
+            syncLock.unlock()
+        }
     }
 
     // MARK: Watch Later
@@ -614,6 +669,70 @@ class AppState(private val context: Context) {
         }
     }
 
+    // MARK: Creators added while the Mac was out of reach
+
+    /** Creators still waiting for the next sync. */
+    val waitingCreators: List<PendingCreator> get() = pendingCreators.filter { it.error == null }
+    /** The first creator the Mac turned down that the user hasn't seen yet. */
+    val creatorFailure: PendingCreator? get() = pendingCreators.firstOrNull { it.error != null }
+
+    /** Adds a creator at the next sync. Returns what to tell the user. */
+    fun queueCreator(formVersion: Int, values: Map<String, String>): String {
+        val creator = PendingCreator(java.util.UUID.randomUUID().toString(), formVersion, values, Instant.now())
+        pendingCreators = pendingCreators.filterNot { it.error == null && it.name.equals(creator.name, ignoreCase = true) } + creator
+        store.savePendingCreators(pendingCreators)
+        return "Your Mac isn't reachable right now. ${creator.name} will be added at the next sync. If your Mac can't add it, you'll see why here."
+    }
+
+    fun cancelPendingCreator(id: String) {
+        pendingCreators = pendingCreators.filter { it.id != id }
+        store.savePendingCreators(pendingCreators)
+    }
+
+    /** The user has seen why the Mac turned it down. */
+    fun dismissCreatorFailure(id: String) = cancelPendingCreator(id)
+
+    /** The last form the Mac sent, or, if this phone never got one, the fields every Mac with Add Creator understands. */
+    fun savedCreatorForm(): CreatorForm =
+        store.loadCreatorForm()?.let { runCatching { CreatorForm.fromJson(org.json.JSONObject(it)) }.getOrNull() }
+            ?: CreatorForm.offline(manifest?.categories.orEmpty())
+
+    fun saveCreatorForm(text: String) = store.saveCreatorForm(text)
+
+    /**
+     * Sends the creators that waited for the Mac. Ones it adds are done; ones it turns down keep its reason, to show;
+     * ones that couldn't be sent wait for the next sync.
+     */
+    private suspend fun sendPendingCreators(client: SyncClient) {
+        val waiting = withContext(Dispatchers.Main) { waitingCreators }
+        if (waiting.isEmpty()) return
+        val results = mutableMapOf<String, String?>()
+        for (creator in waiting) {
+            results[creator.id] = try {
+                val reply = withContext(Dispatchers.IO) { client.addCreator(creator.formVersion, creator.values) }
+                if (reply.optBoolean("added")) null
+                else {
+                    val message = reply.optString("message", "Your Mac couldn't add that creator.")
+                    val errors = reply.optJSONObject("fieldErrors")
+                    val details = errors?.keys()?.asSequence()?.map { errors.getString(it) }?.filter { it != message }?.sorted()?.toList().orEmpty()
+                    (listOf(message) + details).joinToString(" ")
+                }
+            } catch (e: SyncException) {
+                if (e.status == 0) continue
+                if (e.status == 404) "Your Mac needs updating to add creators from here." else e.message ?: "Error ${e.status}"
+            } catch (_: Exception) {
+                continue  // Not sent: the next sync tries again.
+            }
+        }
+        withContext(Dispatchers.Main) {
+            pendingCreators = pendingCreators.mapNotNull { creator ->
+                if (creator.id !in results) creator
+                else results[creator.id]?.let { creator.copy(error = it) }
+            }
+            store.savePendingCreators(pendingCreators)
+        }
+    }
+
     // MARK: Pairing
 
     val deviceName: String
@@ -659,6 +778,9 @@ class AppState(private val context: Context) {
         store.saveBookmarks(emptyMap())
         pendingFollows = emptyList()
         store.savePendingFollows(emptyList())
+        pendingCreators = emptyList()
+        store.savePendingCreators(emptyList())
+        store.saveCreatorForm(null)
         collapsedCards = emptySet()
         lastSyncMessage = null
         lastSyncAt = null
@@ -872,6 +994,7 @@ class AppState(private val context: Context) {
         syncLap("find Mac (${client.host})")
         // Suggested creators added while the Mac was out of reach: before the list, so it already has them moved.
         sendPendingFollows(client)
+        sendPendingCreators(client)
         step("Checking for new videos…")
         // Vines and suggestions come with the short videos: listed every time, downloaded when short videos are.
         val manifestText = withContext(Dispatchers.IO) { client.manifest(SyncForms.All, vine = true, suggested = true) }
@@ -1018,7 +1141,9 @@ class AppState(private val context: Context) {
      * wired first. Otherwise, or if that finds nothing (some networks block Bonjour), tries where the Mac was last
      * seen, then looks for any Mac.
      */
-    private suspend fun connect(saved: Pairing, lookUp: Boolean = false): SyncClient? = withContext(Dispatchers.IO) {
+    private suspend fun connect(
+        saved: Pairing, lookUp: Boolean = false, quick: Boolean = false, savedAddress: Boolean = true,
+    ): SyncClient? = withContext(Dispatchers.IO) {
         fun reachable(host: String, port: Int) = runCatching { SyncClient(host, port).info(1500) }.isSuccess
         val usb = "127.0.0.1" to SyncClient.DEFAULT_PORT
         var target = usb.takeIf { (host, port) -> reachable(host, port) }
@@ -1031,8 +1156,8 @@ class AppState(private val context: Context) {
                 target = (addresses + mac.host).firstOrNull { reachable(it, mac.port) }?.let { it to mac.port }
             }
         }
-        if (target == null) target = (saved.host to saved.port).takeIf { (host, port) -> reachable(host, port) }
-        if (target == null) {
+        if (target == null && savedAddress) target = (saved.host to saved.port).takeIf { (host, port) -> reachable(host, port) }
+        if (target == null && !quick) {
             step("Looking for your Mac on this network…")
             val found = Discovery.find(context).sortedByDescending { it.name == saved.macName }
             target = found.map { it.host to it.port }.firstOrNull { (host, port) -> reachable(host, port) }
@@ -1107,6 +1232,8 @@ class AppState(private val context: Context) {
          * real Wi-Fi, 12 MB videos went at 204 Mbps one at a time, 274 three at a time and 315 six at a time.
          */
         const val PARALLEL_DOWNLOADS = 6
+        /** How many short videos go by between watched-history swaps. Every long video swaps. */
+        const val SHORTS_PER_WATCHED_SWAP = 5
         const val KEY_LAST_MESSAGE = "lastSyncMessage"
         const val KEY_LAST_SYNC = "lastSyncAt"
         const val KEY_MAC_FINISHED = "macDownloadFinished"

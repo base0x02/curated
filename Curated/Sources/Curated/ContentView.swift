@@ -2182,6 +2182,32 @@ struct AvatarView: View {
                 Circle().strokeBorder(library.creator.platform.ring, lineWidth: max(1.5, size / 24))
             }
         }
+        .overlay(alignment: .bottomTrailing) { CreatorBreak(creator: library.creator, size: size) }
+    }
+}
+
+/// The badge on a creator's avatar while they're snoozed (Zzz) or seen less of (a turtle).
+struct CreatorBreak: View {
+    static let snoozeSymbol = "zzz"
+    static let seeLessSymbol = "tortoise.fill"
+
+    let creator: Creator
+    let size: CGFloat
+
+    var body: some View {
+        if let symbol = creator.isSnoozed ? Self.snoozeSymbol : creator.seeLess ? Self.seeLessSymbol : nil {
+            let badge = max(14, size * 0.42)
+            Image(systemName: symbol)
+                .font(.system(size: badge * 0.55, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: badge, height: badge)
+                .background(creator.isSnoozed ? Color.indigo : Color.green, in: Circle())
+                .overlay { Circle().strokeBorder(.background, lineWidth: max(1, badge / 10)) }
+                .offset(x: badge * 0.2, y: badge * 0.15)
+                .help(creator.isSnoozed ? "Snoozed until \(creator.snoozedUntil!.formatted(date: .abbreviated, time: .omitted))"
+                                        : "See Less: one video per \(creator.days) day(s)")
+                .accessibilityLabel(creator.isSnoozed ? "Snoozed" : "See Less")
+        }
     }
 }
 

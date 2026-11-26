@@ -236,6 +236,25 @@ private struct DownloadsSettings: View {
                     .fixedSize(horizontal: false, vertical: true)
                 }
 
+                CardGroup("Snooze", note: "Snooze a creator from their ⋯ menu in Creators & Downloads, or from a phone, to take a break: nothing of theirs downloads until it's over. Videos already here stay.") {
+                    HStack(spacing: 14) {
+                        Image(systemName: CreatorBreak.snoozeSymbol)
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 40, height: 40)
+                            .background(Color.indigo.gradient, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Snooze creators for").font(.body.weight(.medium))
+                            Text("How long Snooze stops a creator's downloads")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 12)
+                        Text(KeepButton.days(model.settings.snoozeDays)).monospacedDigit().fontWeight(.semibold)
+                        Stepper("Snooze creators for", value: $model.settings.snoozeDays, in: 1...365).labelsHidden()
+                    }
+                    .card()
+                }
+
                 CardGroup("Suggested Short Videos", note: "A few videos from the top of your own For You and Shorts feeds, in a Suggested card, to find new creators. Each download clears out the ones you've watched and tops them back up. Needs you signed in.") {
                     SuggestedSettingsCards()
                 }

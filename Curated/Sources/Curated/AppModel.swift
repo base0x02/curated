@@ -776,6 +776,22 @@ final class AppModel {
         reloadLibrary()
     }
 
+    /// See Less: about one video per day window, the most viewed (see `Creator.seeLess`).
+    func setSeeLess(_ seeLess: Bool, for creatorID: String) {
+        guard let i = config.creators.firstIndex(where: { $0.id == creatorID }), config.creators[i].seeLess != seeLess else { return }
+        config.creators[i].seeLess = seeLess
+        reloadLibrary()
+    }
+
+    /// Snoozes a creator for `settings.snoozeDays` from now, or wakes them up.
+    func setSnoozed(_ snoozed: Bool, for creatorID: String) {
+        guard let i = config.creators.firstIndex(where: { $0.id == creatorID }) else { return }
+        let until = snoozed ? Date().addingTimeInterval(Double(max(1, settings.snoozeDays)) * 86_400) : nil
+        guard config.creators[i].snoozedUntil != until else { return }
+        config.creators[i].snoozedUntil = until
+        reloadLibrary()
+    }
+
     func setMinViews(_ minViews: Int?, for creatorID: String) {
         guard let i = config.creators.firstIndex(where: { $0.id == creatorID }) else { return }
         config.creators[i].minViews = minViews

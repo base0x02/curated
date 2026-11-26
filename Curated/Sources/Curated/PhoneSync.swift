@@ -38,13 +38,18 @@ import Foundation
 ///                               "platform"). Phones that don't ask never see them
 ///   POST /suggested/follow      (API 11) {"creator": <suggested creator key>, "category"?: <category id>} → {"ok", "message", "creatorID"?}:
 ///                               adds the creator as a plain one in that category; their suggested videos move to them
+///   POST /creators/<id>/rule    (API 12) {"seeLess"?: Bool, "snoozed"?: Bool} → {"ok", "message", "seeLess", "snoozedUntil"?}:
+///                               See Less (one most-viewed video per day window) and Snooze (no downloads for the Mac's
+///                               `snoozeDays`; snoozing one already snoozed keeps its date). The manifest's creators carry
+///                               "seeLess" and "snoozedUntil", and the manifest "snoozeDays"
 extension AppModel {
     /// 2: long videos (manifest `forms`, `/poster`). 3: Vines (manifest `vine`). Phones from before them ask for
     /// neither and get what they always did. 4: `/positions`. 5: its `nowPlaying`. 6: `/download`, `lastDownloadAt`.
     /// 7: `/download/progress`. 8: `/positions`' `playback`. 9: videos' `pickedAt`.
     /// 10: `/creators/form`, `/creators`, `/creators/<id>/older`, `/older-thumbnail/<id>`.
     /// 11: suggested videos (manifest `suggested`), `/suggested/follow`.
-    static let syncAPIVersion = 11
+    /// 12: See Less and Snooze (`/creators/<id>/rule`, creators' `seeLess` and `snoozedUntil`, `snoozeDays`).
+    static let syncAPIVersion = 12
     static let pairingDuration: TimeInterval = 300
     private static let maxFailedPairings = 5
 
@@ -138,6 +143,9 @@ extension AppModel {
             var suggested: Bool?
             /// API 11, suggested creators only: "tiktok" or "youtube".
             var platform: String?
+            /// API 12: See Less is on, and when a snooze ends (only while snoozed).
+            var seeLess: Bool?
+            var snoozedUntil: Date?
         }
         struct VideoInfo: Encodable {
             let id: String
@@ -167,6 +175,8 @@ extension AppModel {
         var vineCategories: [UUID]?
         /// API 6: when a download last finished, here or in the overnight job. Nil until the first one.
         var lastDownloadAt: Date?
+        /// API 12: how long Snooze lasts.
+        var snoozeDays: Int?
     }
 
     private struct ForceDownloadReply: Encodable {
@@ -239,6 +249,8 @@ extension AppModel {
             return olderVideos(of: parts[1])
         case ("POST", "creators", 3) where parts[2] == "older":
             return requestOlderVideos(of: parts[1], from: request, device: device)
+        case ("POST", "creators", 3) where parts[2] == "rule":
+            return setCreatorRule(parts[1], from: request, device: device)
         case ("GET", "older-thumbnail", 2):
             return olderThumbnail(parts[1])
         case ("POST", "suggested", 2) where parts[1] == "follow":
@@ -354,7 +366,9 @@ extension AppModel {
                 vine: creator.platform == .vine ? true : nil,
                 longForm: creator.canPickOlderLong ? true : nil,
                 suggested: creator.suggested ? true : nil,
-                platform: creator.suggested ? creator.platform.rawValue : nil))
+                platform: creator.suggested ? creator.platform.rawValue : nil,
+                seeLess: creator.seeLess ? true : nil,
+                snoozedUntil: creator.isSnoozed ? creator.snoozedUntil : nil))
         }
         var sent: Set<String> = []
         let videos = (short + long).flatMap(\.videos).filter { sent.insert($0.id).inserted }.map { video in
@@ -371,7 +385,34 @@ extension AppModel {
                         categories: categories, creators: creators, videos: videos,
                         vineCategories: vine ? categories.filter { Vine.categoryNames.contains($0.name.lowercased()) }.map(\.id) : nil,
                         // From the file, since the overnight job writes it from another process.
-                        lastDownloadAt: RunState.load().lastRun)
+                        lastDownloadAt: RunState.load().lastRun, snoozeDays: settings.snoozeDays)
+    }
+
+    /// `POST /creators/<id>/rule`: See Less and Snooze from a phone.
+    private func setCreatorRule(_ id: String, from request: SyncRequest, device: SyncDevice) -> SyncResponse {
+        struct Body: Decodable { var seeLess: Bool?; var snoozed: Bool? }
+        struct Reply: Encodable { let ok: Bool; let message: String; var seeLess = false; var snoozedUntil: Date? }
+        guard let body = try? Self.decoder.decode(Body.self, from: request.body) else {
+            return .error(400, "Expected {\"seeLess\"?, \"snoozed\"?}")
+        }
+        guard let creator = config.creators.first(where: { $0.id == id }), !creator.playlist else {
+            return json(Reply(ok: false, message: "That creator isn't on your Mac any more."))
+        }
+        if let seeLess = body.seeLess { setSeeLess(seeLess, for: id) }
+        if let snoozed = body.snoozed, snoozed != creator.isSnoozed { setSnoozed(snoozed, for: id) }
+        guard let now = config.creators.first(where: { $0.id == id }) else { return .error(500, "Lost the creator") }
+        let name = library(for: id)?.displayName ?? "@\(now.username)"
+        var parts: [String] = []
+        if let until = now.snoozedUntil, now.isSnoozed {
+            parts.append("\(name) is snoozed until \(until.formatted(date: .abbreviated, time: .omitted))")
+        } else if body.snoozed == false {
+            parts.append("\(name) is awake again")
+        }
+        if body.seeLess != nil { parts.append(now.seeLess ? "you'll see less of \(name)" : "\(name) is back to normal") }
+        DownloadLog.info("\(device.name) set \(id): seeLess \(now.seeLess), snoozed until \(now.isSnoozed ? "\(now.snoozedUntil!)" : "-")")
+        let message = parts.joined(separator: ", and ")
+        return json(Reply(ok: true, message: message.prefix(1).uppercased() + message.dropFirst() + ".",
+                          seeLess: now.seeLess, snoozedUntil: now.isSnoozed ? now.snoozedUntil : nil))
     }
 
     // MARK: Helpers
